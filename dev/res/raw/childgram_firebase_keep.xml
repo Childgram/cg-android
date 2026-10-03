@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FirebaseOptions loads these standard resources by name at runtime. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@string/google_app_id,@string/gcm_defaultSenderId,@string/google_api_key,@string/project_id" />

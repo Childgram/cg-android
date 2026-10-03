@@ -24,7 +24,7 @@ public class GcmPushListenerService extends FirebaseMessagingService {
         long time = message.getSentTime();
 
         if (BuildVars.LOGS_ENABLED) {
-            FileLog.d("FCM received data: " + data + " from: " + from);
+            FileLog.d(BuildConfig.CHILDGRAM ? "FCM notification received" : "FCM received data: " + data + " from: " + from);
         }
 
         PushListenerController.processRemoteMessage(PushListenerController.PUSH_TYPE_FIREBASE, data.get("p"), time);
@@ -32,9 +32,12 @@ public class GcmPushListenerService extends FirebaseMessagingService {
 
     @Override
     public void onNewToken(@NonNull String token) {
+        if (BuildConfig.CHILDGRAM && !BuildConfig.CHILDGRAM_PUSH_ENABLED) {
+            return;
+        }
         AndroidUtilities.runOnUIThread(() -> {
             if (BuildVars.LOGS_ENABLED) {
-                FileLog.d("Refreshed FCM token: " + token);
+                FileLog.d(BuildConfig.CHILDGRAM ? "FCM token refreshed" : "Refreshed FCM token: " + token);
             }
             ApplicationLoader.postInitApplication();
             PushListenerController.sendRegistrationToServer(PushListenerController.PUSH_TYPE_FIREBASE, token);

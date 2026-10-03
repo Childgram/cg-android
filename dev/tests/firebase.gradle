@@ -1,0 +1,63 @@
+import groovy.json.JsonOutput
+
+apply from: '/workspace/dev/firebase.gradle'
+
+tasks.register('checkFirebase') {
+    doLast {
+        def configFile = file('build/google-services.json')
+        configFile.parentFile.mkdirs()
+        configFile.delete()
+        int checks = 0
+        def rejected = { String message, Closure action ->
+            try {
+                action()
+                throw new AssertionError('Expected Firebase configuration rejection: ' + message)
+            } catch (GradleException expected) {
+                assert expected.message.contains(message)
+                checks++
+            }
+        }
+        assert loadChildgramFirebase(configFile, 'org.childgram.messenger.beta', false).isEmpty()
+        checks++
+        rejected('release requires') { loadChildgramFirebase(configFile, 'org.childgram', true) }
+        def fixture = {
+            [project_info: [project_id: 'child-gram', project_number: '123456789'], client:
+                ['org.childgram', 'org.childgram.messenger.beta'].collect { pkg ->
+                    [client_info: [mobilesdk_app_id: '1:123456789:android:abcdef123456',
+                                   android_client_info: [package_name: pkg]],
+                     api_key: [[current_key: 'AIza' + 'a' * 35]]]
+                }]
+        }
+        def write = { config -> configFile.text = JsonOutput.toJson(config) }
+        write(fixture())
+        for (pkg in ['org.childgram', 'org.childgram.messenger.beta']) {
+            def values = loadChildgramFirebase(configFile, pkg, true)
+            assert values.size() == 4 && values.project_id == 'child-gram'
+            assert values.gcm_defaultSenderId == '123456789'
+            checks++
+        }
+        rejected('exactly one Android client') { loadChildgramFirebase(configFile, 'org.childgram.beta', true) }
+        def invalid = fixture()
+        invalid.client.add(invalid.client[0])
+        write(invalid)
+        rejected('exactly one Android client') { loadChildgramFirebase(configFile, 'org.childgram', true) }
+        invalid = fixture()
+        invalid.project_info.project_id = 'tmessages2'
+        write(invalid)
+        rejected('project child-gram') { loadChildgramFirebase(configFile, 'org.childgram', true) }
+        invalid = fixture()
+        invalid.client[0].client_info.mobilesdk_app_id = '1:987654321:android:abcdef123456'
+        write(invalid)
+        rejected('invalid sender ID, app ID or API key') { loadChildgramFirebase(configFile, 'org.childgram', true) }
+        invalid = fixture()
+        invalid.client[0].api_key[0].current_key = 'invalid'
+        write(invalid)
+        rejected('invalid sender ID, app ID or API key') { loadChildgramFirebase(configFile, 'org.childgram', true) }
+        write([type: 'service_account', private_key: 'not-a-real-key'])
+        rejected('never a Firebase service-account key') { loadChildgramFirebase(configFile, 'org.childgram', true) }
+        configFile.text = '{invalid-json'
+        rejected('Invalid Firebase Android client JSON') { loadChildgramFirebase(configFile, 'org.childgram', true) }
+        configFile.delete()
+        println "Firebase configuration: ${checks} checks passed."
+    }
+}

@@ -36,8 +36,14 @@ trap 'echo "Release verification failed at line $LINENO." >&2' ERR
     done
     "$buildtools/aapt" dump --values resources "$apk" > "$out/resources.txt"
     grep -A3 "string/childgram_account_type" "$out/resources.txt" | grep -Fq '"org.childgram"'
+    grep -A3 "string/project_id" "$out/resources.txt" | grep -Fq '"child-gram"'
+    grep -q "string/google_app_id" "$out/resources.txt"
+    grep -q "string/gcm_defaultSenderId" "$out/resources.txt"
+    grep -q "string/google_api_key" "$out/resources.txt"
+    grep -A2 'firebase_messaging_auto_init_enabled' "$out/manifest.txt" | grep -Fq '0xffffffff'
     config=TMessagesProj/build/generated/source/buildConfig/release/org/telegram/messenger/BuildConfig.java
     grep -Fq "boolean CHILDGRAM = true;" "$config"
+    grep -Fq "boolean CHILDGRAM_PUSH_ENABLED = true;" "$config"
     grep -Fq "boolean DEBUG_VERSION = false;" "$config"
     grep -Fq "boolean CHILDGRAM_DEV = false;" "$config"
     grep -Fq "String CHILDGRAM_APPLICATION_ID = \"org.childgram\";" "$config"

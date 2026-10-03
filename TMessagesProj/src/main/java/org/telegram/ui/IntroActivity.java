@@ -155,7 +155,7 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
     @Override
     public View createView(Context context) {
         if (BuildVars.CHILDGRAM) {
-            titles[0] = context.getString(R.string.ChildgramAppName);
+            titles[0] = LocaleController.getString(R.string.ChildgramAppName);
         } else {
             logoDrawable = context.getResources().getDrawable(R.drawable.telegram_logo).mutate();
             logoDrawable.setBounds(0, dp(8.666f), dp(115), dp(35));

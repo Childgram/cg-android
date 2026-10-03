@@ -3512,7 +3512,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                 statusDrawable = new AnimatedEmojiDrawable.SwapAnimatedEmojiDrawable(null, dp(26));
                 statusDrawable.center = true;
                 if (BuildVars.CHILDGRAM) {
-                    actionBar.setTitle(context.getString(R.string.ChildgramAppName), statusDrawable);
+                    actionBar.setTitle(LocaleController.getString(R.string.ChildgramAppName), statusDrawable);
                 } else {
                     logoDrawable = context.getResources().getDrawable(R.drawable.telegram_logo_2).mutate();
                     logoDrawable.setBounds(0, dp(2), logoDrawable.getIntrinsicWidth(), dp(2) + logoDrawable.getIntrinsicHeight());

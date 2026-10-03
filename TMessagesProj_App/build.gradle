@@ -193,6 +193,10 @@ android {
         childgramType.resValue 'string', 'AppName', childgramDev ? 'Childgram Dev' : 'Childgram'
         childgramType.resValue 'string', 'AppNameBeta', childgramDev ? 'Childgram Dev' : 'Childgram'
         childgramType.resValue 'string', 'childgram_account_type', APP_PACKAGE + (childgramDev ? '.beta' : '')
+        childgramType.manifestPlaceholders.childgramPushEnabled = (!rootProject.childgramFirebase.isEmpty()).toString()
+        rootProject.childgramFirebase.each { name, value ->
+            childgramType.resValue 'string', name, value
+        }
     }
 
     applicationVariants.all { variant ->

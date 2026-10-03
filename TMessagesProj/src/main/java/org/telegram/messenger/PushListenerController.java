@@ -130,7 +130,7 @@ public class PushListenerController {
                     if (!Arrays.equals(SharedConfig.pushAuthKeyId, inAuthKeyId)) {
                         onDecryptError();
                         if (BuildVars.LOGS_ENABLED) {
-                            FileLog.d(String.format(Locale.US, tag + " DECRYPT ERROR 2 k1=%s k2=%s, key=%s", Utilities.bytesToHex(SharedConfig.pushAuthKeyId), Utilities.bytesToHex(inAuthKeyId), Utilities.bytesToHex(SharedConfig.pushAuthKey)));
+                            FileLog.d(BuildConfig.CHILDGRAM ? tag + " DECRYPT ERROR 2" : String.format(Locale.US, tag + " DECRYPT ERROR 2 k1=%s k2=%s, key=%s", Utilities.bytesToHex(SharedConfig.pushAuthKeyId), Utilities.bytesToHex(inAuthKeyId), Utilities.bytesToHex(SharedConfig.pushAuthKey)));
                         }
                         return;
                     }
@@ -145,7 +145,7 @@ public class PushListenerController {
                     if (!Utilities.arraysEquals(messageKey, 0, messageKeyFull, 8)) {
                         onDecryptError();
                         if (BuildVars.LOGS_ENABLED) {
-                            FileLog.d(String.format(tag + " DECRYPT ERROR 3, key = %s", Utilities.bytesToHex(SharedConfig.pushAuthKey)));
+                            FileLog.d(BuildConfig.CHILDGRAM ? tag + " DECRYPT ERROR 3" : String.format(tag + " DECRYPT ERROR 3, key = %s", Utilities.bytesToHex(SharedConfig.pushAuthKey)));
                         }
                         return;
                     }
@@ -1503,9 +1503,13 @@ public class PushListenerController {
                         onDecryptError();
                     }
                     if (BuildVars.LOGS_ENABLED) {
-                        FileLog.e("error in loc_key = " + loc_key + " json " + jsonString);
+                        FileLog.e(BuildConfig.CHILDGRAM ? "error processing push notification" : "error in loc_key = " + loc_key + " json " + jsonString);
                     }
-                    FileLog.e(e);
+                    if (BuildConfig.CHILDGRAM) {
+                        FileLog.e("Push processing failed: " + e.getClass().getSimpleName());
+                    } else {
+                        FileLog.e(e);
+                    }
                 }
             });
         });
@@ -1684,7 +1688,7 @@ public class PushListenerController {
             String currentPushString = SharedConfig.pushString;
             if (!TextUtils.isEmpty(currentPushString)) {
                 if (BuildVars.DEBUG_PRIVATE_VERSION && BuildVars.LOGS_ENABLED) {
-                    FileLog.d("FCM regId = " + currentPushString);
+                    FileLog.d(BuildConfig.CHILDGRAM ? "FCM registration present" : "FCM regId = " + currentPushString);
                 }
             } else {
                 if (BuildVars.LOGS_ENABLED) {
@@ -1701,6 +1705,10 @@ public class PushListenerController {
                                 if (!task.isSuccessful()) {
                                     if (BuildVars.LOGS_ENABLED) {
                                         FileLog.d("Failed to get regid");
+                                        if (BuildConfig.CHILDGRAM && task.getException() != null) {
+                                            String reason = task.getException().getMessage();
+                                            FileLog.e("FCM token request failed: " + (reason != null && reason.matches("[A-Z0-9_]{1,80}") ? reason : task.getException().getClass().getSimpleName()));
+                                        }
                                     }
                                     SharedConfig.pushStringStatus = "__FIREBASE_FAILED__";
                                     PushListenerController.sendRegistrationToServer(getPushType(), null);
@@ -1708,6 +1716,9 @@ public class PushListenerController {
                                 }
                                 String token = task.getResult();
                                 if (!TextUtils.isEmpty(token)) {
+                                    if (BuildConfig.CHILDGRAM) {
+                                        SharedConfig.pushStringStatus = "";
+                                    }
                                     PushListenerController.sendRegistrationToServer(getPushType(), token);
                                 }
                             });
@@ -1719,7 +1730,7 @@ public class PushListenerController {
 
         @Override
         public boolean hasServices() {
-            if (BuildConfig.CHILDGRAM) {
+            if (BuildConfig.CHILDGRAM && !BuildConfig.CHILDGRAM_PUSH_ENABLED) {
                 return false;
             }
             if (hasServices == null) {

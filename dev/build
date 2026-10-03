@@ -12,6 +12,8 @@ Usage: ./dev/build [--smoke] [Gradle tasks/options...]
 Builds an ARM64 Childgram APK in Docker. Normal builds require
 .local/telegram.properties; --smoke explicitly uses Telegram's public test keys.
 --release builds org.childgram with the existing key in .local/signing/.
+Release also requires .local/firebase/google-services.json for child-gram.
+Dev builds enable FCM when that client configuration is present.
 Create that key once with ./dev/signing-key --create, then keep a secure backup.
 Default task: :TMessagesProj_App:assembleAfatDebug
 Output: TMessagesProj_App/build/outputs/apk/afat/debug/app.apk

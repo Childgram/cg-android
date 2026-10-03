@@ -22,6 +22,6 @@
             android:icon="@mipmap/childgram_launcher" android:roundIcon="@mipmap/childgram_launcher"
             tools:replace="android:icon,android:roundIcon" />
         <meta-data android:name="com.google.android.maps.v2.API_KEY" tools:node="remove" />
-        <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="false" />
+        <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="${childgramPushEnabled}" />
     </application>
 </manifest>

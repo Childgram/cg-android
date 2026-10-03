@@ -1,0 +1,41 @@
+import groovy.json.JsonSlurper
+
+// Read only the Android client configuration. Server/service-account keys never
+// belong in the application or its build environment.
+ext.loadChildgramFirebase = { File configFile, String packageName, boolean required ->
+    if (!configFile.isFile()) {
+        if (required) {
+            throw new GradleException('Childgram release requires .local/firebase/google-services.json from Firebase project child-gram.')
+        }
+        return [:]
+    }
+    def config
+    try {
+        config = new JsonSlurper().parse(configFile)
+    } catch (Exception ignored) {
+        throw new GradleException('Invalid Firebase Android client JSON in .local/firebase/google-services.json.')
+    }
+    if (!(config instanceof Map) || config.type == 'service_account' || config.containsKey('private_key')) {
+        throw new GradleException('Use the Android google-services.json, never a Firebase service-account key.')
+    }
+    if (config.project_info?.project_id != 'child-gram') {
+        throw new GradleException('Firebase configuration must belong to project child-gram.')
+    }
+    def clients = config.client instanceof List ? config.client.findAll {
+        it.client_info?.android_client_info?.package_name == packageName
+    } : []
+    if (clients.size() != 1) {
+        throw new GradleException("Firebase configuration must contain exactly one Android client for ${packageName}.")
+    }
+    def senderId = config.project_info.project_number
+    def appId = clients[0].client_info.mobilesdk_app_id
+    def apiKey = clients[0].api_key?.find { it.current_key }?.current_key
+    if (!(senderId instanceof String && senderId ==~ /[1-9][0-9]*/) ||
+            !(appId instanceof String && appId ==~ /1:${senderId}:android:[0-9a-f]+/) ||
+            !(apiKey instanceof String && apiKey ==~ /AIza[0-9A-Za-z_-]{35}/)) {
+        throw new GradleException('Firebase Android configuration has an invalid sender ID, app ID or API key.')
+    }
+    // These are the standard resources read by FirebaseOptions.fromResource.
+    return [google_app_id: appId, gcm_defaultSenderId: senderId,
+            google_api_key: apiKey, project_id: config.project_info.project_id]
+}

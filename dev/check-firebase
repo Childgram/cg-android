@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+# Validate the actual Gradle configuration loader with isolated, non-secret fixtures.
+docker run --rm --network none --platform linux/amd64 \
+    -v "$PWD:/workspace" -w /workspace childgram-android:36-ndk27 bash -euc '
+    umask 077
+    out=.local/checks/firebase
+    mkdir -p "$out"
+    touch "$out/settings.gradle"
+    cp dev/tests/firebase.gradle "$out/build.gradle"
+    gradle --no-daemon --console=plain --offline -p "$out" checkFirebase
+'
