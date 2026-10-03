@@ -265,6 +265,7 @@
     <string name="RemindDayYearAt">\'Напомнить\' d MMM yyyy \'в\' HH:mm</string>
 
     <!-- Childgram -->
+    <string name="ChildgramIntroMessage">Безопасная среда в месседжере Telegram</string>
     <string name="ChildgramAccessDenied">Доступ ограничен. Если вам нужен этот чат, обратитесь к родителям.</string>
     <string name="ChildgramAccessCheckFailed">Не удалось проверить доступ. Подключитесь к интернету и попробуйте снова.</string>
     <string name="ChildgramPrivacyCheckFailed">Не удалось проверить настройку приглашений. Повторим проверку при подключении.</string>

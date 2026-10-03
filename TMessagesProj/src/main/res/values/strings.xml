@@ -11237,6 +11237,8 @@
     <string name="RoundVideoCompositionInfo">Disable styling to record a plain square without outside-circle blur, dimming or Telegram overlays.</string>
 
     <!-- Childgram -->
+    <string name="ChildgramAppName" translatable="false">Childgram</string>
+    <string name="ChildgramIntroMessage">A safe environment in Telegram messenger</string>
     <string name="ChildgramAccessDenied">Access is restricted. Ask your parents if you need access to this chat.</string>
     <string name="ChildgramAccessCheckFailed">Could not verify access. Connect to the internet and try again.</string>
     <string name="ChildgramPrivacyCheckFailed">Could not verify invitation privacy. We will try again when connected.</string>

@@ -45,6 +45,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
@@ -141,7 +142,7 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
                 LocaleController.getString(R.string.Page6Title)
         };
         messages = new String[]{
-                LocaleController.getString(R.string.Page1Message),
+                LocaleController.getString(BuildVars.CHILDGRAM ? R.string.ChildgramIntroMessage : R.string.Page1Message),
                 LocaleController.getString(R.string.Page2Message),
                 LocaleController.getString(R.string.Page3Message),
                 LocaleController.getString(R.string.Page5Message),
@@ -153,11 +154,15 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
 
     @Override
     public View createView(Context context) {
-        logoDrawable = context.getResources().getDrawable(R.drawable.telegram_logo).mutate();
-        logoDrawable.setBounds(0, dp(8.666f), dp(115), dp(35));
-        SpannableStringBuilder ssb = new SpannableStringBuilder(LocaleController.getString(R.string.Page1Title));
-        ssb.setSpan(new ImageSpan(logoDrawable), 0, ssb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        titles[0] = ssb;
+        if (BuildVars.CHILDGRAM) {
+            titles[0] = context.getString(R.string.ChildgramAppName);
+        } else {
+            logoDrawable = context.getResources().getDrawable(R.drawable.telegram_logo).mutate();
+            logoDrawable.setBounds(0, dp(8.666f), dp(115), dp(35));
+            SpannableStringBuilder ssb = new SpannableStringBuilder(LocaleController.getString(R.string.Page1Title));
+            ssb.setSpan(new ImageSpan(logoDrawable), 0, ssb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            titles[0] = ssb;
+        }
 
 
         actionBar.setAddToContainer(false);
@@ -248,6 +253,7 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
         frameContainerView.addView(frameLayout2, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.TOP, 0, 78, 0, 0));
 
         TextureView textureView = new TextureView(context);
+        textureView.setAlpha(BuildVars.CHILDGRAM ? 0f : 1f);
         frameLayout2.addView(textureView, LayoutHelper.createFrame(ICON_WIDTH_DP, ICON_HEIGHT_DP, Gravity.CENTER));
         textureView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
             @Override
@@ -301,6 +307,9 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
             @Override
             public void onPageScrolled(int position, float positionOffset, int positionOffsetPixels) {
                 bottomPages.setPageOffset(position, positionOffset);
+                if (BuildVars.CHILDGRAM) {
+                    textureView.setAlpha(position == 0 ? positionOffset : 1f);
+                }
 
                 float width = viewPager.getMeasuredWidth();
                 if (width == 0) {
@@ -569,12 +578,23 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
             headerTextView.setTag(pagerHeaderTag);
             TextView messageTextView = new TextView(container.getContext());
             messageTextView.setTag(pagerMessageTag);
+            ImageView childgramLogo = BuildVars.CHILDGRAM && position == 0 ? new ImageView(container.getContext()) : null;
+            if (childgramLogo != null) {
+                // Render at the view size instead of scaling the adaptive icon's cached bitmap.
+                childgramLogo.setScaleType(ImageView.ScaleType.FIT_XY);
+                childgramLogo.setImageResource(container.getContext().getApplicationInfo().icon);
+                childgramLogo.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            }
 
             FrameLayout frameLayout = new FrameLayout(container.getContext()) {
                 @Override
                 protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
                     int oneFourth = (bottom - top) / 4;
                     int y = (oneFourth * 3 - dp(275)) / 2;
+                    if (childgramLogo != null) {
+                        int logoX = (getMeasuredWidth() - childgramLogo.getMeasuredWidth()) / 2;
+                        childgramLogo.layout(logoX, y, logoX + childgramLogo.getMeasuredWidth(), y + childgramLogo.getMeasuredHeight());
+                    }
                     y += dp(ICON_HEIGHT_DP);
                     y += dp(16 + 9);
                     int x = dp(18);
@@ -586,6 +606,10 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
                     messageTextView.layout(x, y, x + messageTextView.getMeasuredWidth(), y + messageTextView.getMeasuredHeight());
                 }
             };
+
+            if (childgramLogo != null) {
+                frameLayout.addView(childgramLogo, LayoutHelper.createFrame(ICON_HEIGHT_DP, ICON_HEIGHT_DP, Gravity.TOP | Gravity.CENTER_HORIZONTAL));
+            }
 
             headerTextView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
             headerTextView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 26);
@@ -962,7 +986,9 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
 
     private void updateColors(boolean fromTheme) {
         startMessagingButtonBackground.setColors(new int[]{getThemedColor(Theme.key_featuredStickers_addButton), getThemedColor(Theme.key_featuredStickers_addButton2)});
-        logoDrawable.setColorFilter(Theme.multAlpha(getThemedColor(Theme.key_actionBarDefaultTitle), 0.9f), PorterDuff.Mode.MULTIPLY);
+        if (logoDrawable != null) {
+            logoDrawable.setColorFilter(Theme.multAlpha(getThemedColor(Theme.key_actionBarDefaultTitle), 0.9f), PorterDuff.Mode.MULTIPLY);
+        }
         fragmentView.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
         switchLanguageTextView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText4));
         startMessagingButton.setTextColor(Theme.getColor(Theme.key_featuredStickers_buttonText));
