@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+export ANDROID_HOME="${CHILDGRAM_ANDROID_SDK:-${ANDROID_HOME:-$HOME/Library/Android/sdk}}"
+export ANDROID_SDK_ROOT="$ANDROID_HOME"
+export ANDROID_USER_HOME="$ROOT/.local/android"
+export ANDROID_EMULATOR_HOME="$ANDROID_USER_HOME"
+export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+export ANDROID_SDK_HOME="$ROOT/.local"
+NAME=childgram-api34
+SERIAL=emulator-5580
+ADB="$ANDROID_HOME/platform-tools/adb"
+EMULATOR="$ANDROID_HOME/emulator/emulator"
+PACKAGE=org.childgram.messenger.beta
+APK="$ROOT/TMessagesProj_App/build/outputs/apk/afat/debug/app.apk"
+if [[ "${1:-}" == --release ]]; then
+  PACKAGE=org.childgram
+  APK="$ROOT/TMessagesProj_App/build/outputs/apk/afat/release/app.apk"
+  shift
+fi
+IMAGE='system-images;android-34;google_apis;arm64-v8a'
+
+die() { printf '%s\n' "$*" >&2; exit 1; }
+adb() { "$ADB" -s "$SERIAL" "$@"; }
+check_device() {
+  local name
+  name=$(adb emu avd name 2>/dev/null | tr -d '\r' | head -n 1) || true
+  [[ "$name" == "$NAME" ]] || die "$SERIAL is not the project AVD ($NAME)."
+}
+setup() {
+  [[ "$(uname -m)" == arm64 ]] || die 'This emulator setup requires an ARM64 host.'
+  [[ -x "$ADB" && -x "$EMULATOR" ]] || die "SDK emulator/platform-tools missing: $ANDROID_HOME"
+  [[ -f "$ANDROID_HOME/system-images/android-34/google_apis/arm64-v8a/system.img" ]] ||
+    die "Install $IMAGE in an SDK, then set CHILDGRAM_ANDROID_SDK to its directory."
+  mkdir -p "$ANDROID_AVD_HOME"
+  [[ ! -f "$ANDROID_AVD_HOME/$NAME.ini" ]] || return 0
+  local manager java_home
+  manager="$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager"
+  java_home="${JAVA_HOME:-}"
+  if [[ ! -x "$manager" ]]; then
+    manager="$ANDROID_HOME/tools/bin/avdmanager"
+    java_home="${CHILDGRAM_AVDMANAGER_JAVA_HOME:-/Library/Internet Plug-Ins/JavaAppletPlugin.plugin/Contents/Home}"
+  fi
+  [[ -x "$manager" ]] || die "avdmanager missing from $ANDROID_HOME"
+  [[ -x "$java_home/bin/java" ]] || die 'Set JAVA_HOME (modern tools) or CHILDGRAM_AVDMANAGER_JAVA_HOME (legacy tools).'
+  if ! printf 'no\n' | JAVA_HOME="$java_home" "$manager" create avd \
+    -n "$NAME" -k "$IMAGE" -d 'Nexus 5X' -p "$ANDROID_AVD_HOME/$NAME.avd" \
+    >"$ANDROID_USER_HOME/setup.log" 2>&1; then
+    tail -20 "$ANDROID_USER_HOME/setup.log" >&2
+    die "AVD setup failed; see $ANDROID_USER_HOME/setup.log"
+  fi
+  printf 'Created %s in %s.\n' "$NAME" "$ANDROID_AVD_HOME"
+}
+start() {
+  local options=(-no-snapshot -no-audio -no-boot-anim -no-metrics -memory 3072 -cores 4 -gpu auto)
+  local launched_pid=''
+  if [[ "${1:-}" == --headless ]]; then options+=(-no-window); shift; fi
+  [[ $# == 0 ]] || die 'Usage: dev/emulator start [--headless]'
+  setup
+  if adb get-state >/dev/null 2>&1; then
+    check_device
+  else
+    "$EMULATOR" -avd "$NAME" -port 5580 "${options[@]}" \
+      >"$ANDROID_USER_HOME/emulator.log" 2>&1 &
+    launched_pid=$!
+    echo "$launched_pid" >"$ANDROID_USER_HOME/emulator.pid"
+    trap 'kill "$launched_pid" 2>/dev/null || true' EXIT
+  fi
+  local attempt
+  for ((attempt=0; attempt<90; attempt++)); do
+    if [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == 1 ]]; then
+      check_device
+      printf '%s is ready (%s).\n' "$NAME" "$SERIAL"
+      if [[ -n "$launched_pid" ]]; then
+        printf 'Keep this terminal open; use dev/emulator stop from another terminal to stop.\n'
+        wait "$launched_pid"
+        trap - EXIT
+      fi
+      return
+    fi
+    if [[ -n "$launched_pid" ]] && ! kill -0 "$launched_pid" 2>/dev/null; then
+      die "Emulator exited before boot; see $ANDROID_USER_HOME/emulator.log"
+    fi
+    sleep 2
+  done
+  die "Emulator did not boot within 180 seconds; see $ANDROID_USER_HOME/emulator.log"
+}
+
+case "${1:-help}" in
+  setup) setup ;;
+  start) shift; start "$@" ;;
+  stop) check_device; adb emu kill ;;
+  adb) shift; check_device; adb "$@" ;;
+  install) shift; check_device; adb install -r "${1:-$APK}" ;;
+  debug)
+    check_device
+    pid=$(adb shell pidof "$PACKAGE" | tr -d '\r') || die 'App is not running.'
+    [[ "$pid" =~ ^[0-9]+$ ]] || die 'Expected exactly one running app process.'
+    adb shell run-as "$PACKAGE" true || die 'App is not debuggable.'
+    adb forward --no-rebind tcp:8700 "jdwp:$pid" ||
+      die 'Port 8700 is already forwarded; inspect dev/emulator adb forward --list.'
+    printf '%s\n' 'In Android Studio, attach a Remote JVM Debugger to localhost:8700.'
+    ;;
+  logcat)
+    check_device
+    pid=$(adb shell pidof "$PACKAGE" | tr -d '\r') || die 'App is not running.'
+    adb logcat --pid="$pid"
+    ;;
+  screenshot)
+    check_device
+    adb exec-out screencap -p >"$ANDROID_USER_HOME/screenshot.png"
+    printf '%s/screenshot.png\n' "$ANDROID_USER_HOME"
+    ;;
+  smoke)
+    check_device
+    adb logcat -b crash -c
+    adb shell am force-stop "$PACKAGE"
+    launch=$(adb shell am start -W -n "$PACKAGE/org.telegram.ui.LaunchActivity" | tr -d '\r')
+    printf '%s\n' "$launch"
+    if [[ "$launch" == *'Status: timeout'* ]]; then
+      # Android's fixed 10-second wait can expire on a cold debug start in the AVD.
+      # Require actual rendered frames from the new process, not just an Activity record.
+      frames=0
+      for ((attempt=0; attempt<15; attempt++)); do
+        frames=$(adb shell dumpsys gfxinfo "$PACKAGE" | awk '/Total frames rendered:/ {print $4; exit}')
+        if [[ "$frames" =~ ^[0-9]+$ && "$frames" -gt 0 ]]; then break; fi
+        sleep 2
+      done
+      [[ "$frames" =~ ^[0-9]+$ && "$frames" -gt 0 ]] || die 'App did not render a frame after the cold-start timeout.'
+      printf 'Slow cold start: confirmed %s rendered frames.\n' "$frames"
+    else
+      [[ "$launch" == *'Status: ok'* ]] || die 'Android did not confirm the activity launch.'
+    fi
+    sleep 5
+    adb shell pidof "$PACKAGE" >/dev/null || die 'App exited after launch; inspect logcat.'
+    adb exec-out screencap -p >"$ANDROID_USER_HOME/screenshot.png"
+    resumed=$(adb shell dumpsys activity activities | tr -d '\r' | grep -E 'mResumedActivity|topResumedActivity')
+    [[ "$resumed" == *"$PACKAGE/org.telegram.ui.LaunchActivity"* ]] ||
+      die "App is not the resumed activity; see $ANDROID_USER_HOME/screenshot.png"
+    adb logcat -b crash -d >"$ANDROID_USER_HOME/crash.log"
+    if grep -Fq "$PACKAGE" "$ANDROID_USER_HOME/crash.log"; then
+      die "App crash recorded; see $ANDROID_USER_HOME/crash.log"
+    fi
+    printf 'App is running; screenshot: %s/screenshot.png\n' "$ANDROID_USER_HOME"
+    ;;
+  *) printf '%s\n' 'Usage: dev/emulator [--release] {setup|start [--headless]|stop|adb ARGS|install [APK]|debug|smoke|logcat|screenshot}' ;;
+esac

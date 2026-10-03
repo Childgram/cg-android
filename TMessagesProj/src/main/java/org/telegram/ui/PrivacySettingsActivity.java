@@ -750,7 +750,7 @@ public class PrivacySettingsActivity extends BaseFragment implements Notificatio
         giftsRow = rowCount++;
         bioRow = rowCount++;
         musicRow = rowCount++;
-        groupsRow = rowCount++;
+        groupsRow = BuildVars.CHILDGRAM ? -1 : rowCount++;
         privacyShadowRow = rowCount++;
 
         if (getMessagesController().autoarchiveAvailable || getUserConfig().isPremium()) {

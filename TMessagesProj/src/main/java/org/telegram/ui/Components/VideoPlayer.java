@@ -126,6 +126,7 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
 
     public interface VideoPlayerDelegate {
         void onStateChanged(boolean playWhenReady, int playbackState);
+        default void onPlaybackActivityChanged(boolean isPlaying) {}
         void onError(VideoPlayer player, Exception e);
         void onVideoSizeChanged(int width, int height, int unappliedRotationDegrees, float pixelWidthHeightRatio);
         void onRenderedFirstFrame();
@@ -1668,6 +1669,11 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
                 audioVisualizerDelegate.onVisualizerUpdate(false, true, null);
             }
         }
+    }
+
+    @Override
+    public void onIsPlayingChanged(boolean isPlaying) {
+        if (delegate != null) delegate.onPlaybackActivityChanged(isPlaying);
     }
 
     @Override

@@ -35,6 +35,8 @@ import androidx.core.util.Consumer;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
+import org.telegram.messenger.BuildVars;
+import org.telegram.messenger.ChildgramAccess;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.FileLoader;
 import org.telegram.messenger.ImageLoader;
@@ -94,6 +96,16 @@ public class AvatarPreviewer {
         Objects.requireNonNull(parentContainer);
         Objects.requireNonNull(data);
         Objects.requireNonNull(callback);
+        if (BuildVars.CHILDGRAM) {
+            long id = data.parentObject instanceof TLRPC.Chat ? -((TLRPC.Chat) data.parentObject).id
+                    : data.parentObject instanceof TLRPC.User ? ((TLRPC.User) data.parentObject).id : 0;
+            if (id != 0 && !ChildgramAccess.getInstance(UserConfig.selectedAccount).isAllowed(id)) {
+                ChildgramAccess.getInstance(UserConfig.selectedAccount).check(id, LaunchActivity.getLastFragment(), () -> {
+                    if (parentContainer.isAttachedToWindow()) show(parentContainer, resourcesProvider, data, callback);
+                });
+                return;
+            }
+        }
 
         final Context context = parentContainer.getContext();
 

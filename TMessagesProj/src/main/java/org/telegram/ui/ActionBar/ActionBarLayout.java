@@ -62,6 +62,7 @@ import androidx.core.math.MathUtils;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
+import org.telegram.messenger.ChildgramAccess;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.AnimationNotificationsLocker;
 import org.telegram.messenger.BuildVars;
@@ -1949,6 +1950,9 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
         boolean preview = params.preview;
         ActionBarPopupWindow.ActionBarPopupWindowLayout menu = params.menuView;
 
+        if (fragment != null && !ChildgramAccess.getInstance(fragment.getCurrentAccount()).guardFragment(fragment, () -> presentFragment(params))) {
+            return false;
+        }
         if (fragment == null || checkTransitionAnimation() || delegate != null && check && !delegate.needPresentFragment(this, params) || !fragment.onFragmentCreate()) {
             return false;
         }
@@ -2330,6 +2334,10 @@ public class ActionBarLayout extends FrameLayout implements INavigationLayout, F
 
     @Override
     public boolean addFragmentToStack(BaseFragment fragment, int position) {
+        final int requestedPosition = position;
+        if (!ChildgramAccess.getInstance(fragment.getCurrentAccount()).guardFragment(fragment, () -> addFragmentToStack(fragment, requestedPosition))) {
+            return false;
+        }
         if (delegate != null && !delegate.needAddFragmentToStack(fragment, this) || !fragment.onFragmentCreate()) {
             return false;
         }

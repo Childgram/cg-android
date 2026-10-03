@@ -1,0 +1,4 @@
+# Obtain at https://my.telegram.org/apps (API development tools).
+# Copy to .local/telegram.properties. Never commit the filled file.
+TELEGRAM_API_ID=
+TELEGRAM_API_HASH=

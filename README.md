@@ -1,3 +1,28 @@
+# Childgram for Android
+
+Childgram is an unofficial Telegram client with controlled access to chats and
+local usage statistics. It uses the Telegram API and remains part of the Telegram
+ecosystem. The current implementation limits entry to unfamiliar channels, groups
+and bots, preserves ordinary personal chats, and reports time by chat and hour,
+including a separate full-screen video counter.
+
+**Status: local alpha candidate; not publicly released.** Background notification
+delivery, final branding and an update distribution channel are still pending.
+Usage statistics stay on the device; clearing app data removes that local history.
+
+- Release application ID: `org.childgram` (ARM64 APK).
+- Development application ID: `org.childgram.messenger.beta`.
+- Build, signing, behavior and verification: [Childgram development guide](dev/README.md).
+- Public release certificate: [SHA-256 fingerprint](dev/release-certificate.sha256).
+- Upstream base: [Telegram 12.10.6, build 7112](https://github.com/DrKLO/Telegram/tree/f2908b14133bbffbf7ab04f641ecb5bfaf533242).
+- Upstream [license](LICENSE) and attribution are retained.
+
+Use the Childgram guide for this fork. The original Telegram README follows as
+upstream reference; Childgram keeps its own credentials and signing key in ignored
+`.local/` files and builds with Docker.
+
+---
+
 ## Telegram messenger for Android
 
 [Telegram](https://telegram.org) is a messaging app with a focus on speed and security. It’s superfast, simple and free.

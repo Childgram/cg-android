@@ -52,6 +52,7 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import org.telegram.ui.recyclerview.LinearSmoothScrollerCustom;
 import androidx.recyclerview.widget.RecyclerView;
 
+import org.telegram.messenger.ChildgramAccess;
 import org.telegram.messenger.AccountInstance;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.AnimationNotificationsLocker;
@@ -2687,6 +2688,10 @@ public class TopicsFragment extends BaseFragment implements NotificationCenter.N
 
     @Override
     public boolean onFragmentCreate() {
+        if (BuildVars.CHILDGRAM && !ChildgramAccess.getInstance(currentAccount).isFragmentAllowed(this)) {
+            ChildgramAccess.deny(this);
+            return false;
+        }
         getMessagesController().loadFullChat(chatId, 0, true);
         NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.storiesUpdated);
         NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.chatWasBoostedByUser);

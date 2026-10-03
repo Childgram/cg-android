@@ -93,6 +93,7 @@ import com.google.firebase.appindexing.FirebaseUserActions;
 import com.google.firebase.appindexing.builders.AssistActionBuilder;
 
 import org.telegram.PhoneFormat.PhoneFormat;
+import org.telegram.messenger.ChildgramAccess;
 import org.telegram.messenger.AccountInstance;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.AnimationNotificationsLocker;
@@ -1461,6 +1462,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
             overlay.onShow(fingerprint && i == overlayPasscodeViews.size() - 1, animated, x, y, null, null);
         }
         SharedConfig.isWaitingForPasscodeEnter = true;
+        org.telegram.messenger.ChildgramUsageTracker.refreshVisibleScreen();
         PasscodeView.PasscodeViewDelegate delegate = view -> {
             SharedConfig.isWaitingForPasscodeEnter = false;
             if (passcodeSaveIntent != null) {
@@ -1479,6 +1481,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                 rightActionBarLayout.getView().setVisibility(View.VISIBLE);
             }
             NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.passcodeDismissed, view);
+            org.telegram.messenger.ChildgramUsageTracker.refreshVisibleScreen();
             try {
                 NotificationsController.getInstance(UserConfig.selectedAccount).showNotifications();
             } catch (Exception e) {
@@ -3510,6 +3513,11 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         if (chat == null) {
             return 0;
         }
+        if (BuildVars.CHILDGRAM && !ChildgramAccess.getInstance(intentAccount).isAllowed(-chat.id)) {
+            ChildgramAccess.getInstance(intentAccount).check(-chat.id, getLastFragment(), () -> runCommentRequest(intentAccount, dismissLoading, messageId, commentId, threadId, taskId, pollOptionId, chat, onOpened, quote, fromMessageId, quoteOffset));
+            dismissLoading.run();
+            return 0;
+        }
         TLRPC.TL_messages_getDiscussionMessage req = new TLRPC.TL_messages_getDiscussionMessage();
         req.peer = MessagesController.getInputPeer(chat);
         req.msg_id = commentId != null ? messageId : (int) (long) threadId;
@@ -4233,6 +4241,11 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                         .show();
                     return;
                 }
+                if (BuildVars.CHILDGRAM && peerId != null && !ChildgramAccess.getInstance(intentAccount).isAllowed(peerId)) {
+                    dismissLoading.run();
+                    ChildgramAccess.getInstance(intentAccount).check(peerId, getLastFragment(), () -> runLinkRequest(intentAccount, username, group, sticker, emoji, botUser, botChat, botChannel, botChatAdminParams, message, contactToken, folderSlug, text, hasUrl, messageId, channelId, threadId, commentId, game, auth, lang, unsupportedUrl, code, loginToken, wallPaper, inputInvoiceSlug, uniqueGiftSlug, theme, voicechat, videochat, livestream, state, videoTimestamp, setAsAttachBot, attachMenuBotToOpen, attachMenuBotChoose, botAppMaybe, botAppStartParam, progress, forceNotInternalForApps, storyId, liveStory, storyAlbumId, giftCollectionId, auctionSlug, stargiftPreviewSlug, isBoost, chatLinkSlug, botCompact, botFullscreen, openedTelegram, openProfile, forceRequest, referrer, taskId, openDirect, pollOptionId));
+                    return;
+                }
                 if (!LaunchActivity.this.isFinishing()) {
                     boolean hideProgressDialog = true;
                     if (liveStory && peerId != null) {
@@ -4887,6 +4900,14 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                         boolean hideProgressDialog = true;
                         if (error == null && actionBarLayout != null) {
                             TLRPC.ChatInvite invite = (TLRPC.ChatInvite) response;
+                            if (BuildVars.CHILDGRAM) {
+                                if (invite.chat != null) MessagesController.getInstance(intentAccount).putChat(invite.chat, false);
+                                if (!(invite instanceof TLRPC.TL_chatInviteAlready) || invite.chat == null || !ChildgramAccess.getInstance(intentAccount).isAllowed(-invite.chat.id)) {
+                                    dismissLoading.run();
+                                    ChildgramAccess.deny(getLastFragment());
+                                    return;
+                                }
+                            }
                             if (invite.chat != null && (!ChatObject.isLeftFromChat(invite.chat) || !invite.chat.kicked && (ChatObject.isPublic(invite.chat) || invite instanceof TLRPC.TL_chatInvitePeek || invite.chat.has_geo))) {
                                 MessagesController.getInstance(intentAccount).putChat(invite.chat, false);
                                 ArrayList<TLRPC.Chat> chats = new ArrayList<>();
@@ -4986,6 +5007,11 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                     }
                 }), ConnectionsManager.RequestFlagFailOnServerErrors);
             } else if (state == 1) {
+                if (BuildVars.CHILDGRAM) {
+                    dismissLoading.run();
+                    ChildgramAccess.deny(getLastFragment());
+                    return;
+                }
                 TLRPC.TL_messages_importChatInvite req = new TLRPC.TL_messages_importChatInvite();
                 req.hash = group;
                 ConnectionsManager.getInstance(intentAccount).sendRequestTyped(req, null, (response, error) -> {
@@ -5698,6 +5724,10 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
     }
 
     private void processAttachMenuBot(int intentAccount, long peerId, String attachMenuBotChoose, TLRPC.User user,  String setAsAttachBot, String startAppParam) {
+        if (BuildVars.CHILDGRAM && !ChildgramAccess.getInstance(intentAccount).isAllowed(peerId)) {
+            ChildgramAccess.getInstance(intentAccount).check(peerId, getLastFragment(), () -> processAttachMenuBot(intentAccount, peerId, attachMenuBotChoose, user, setAsAttachBot, startAppParam));
+            return;
+        }
         TLRPC.TL_messages_getAttachMenuBot getAttachMenuBot = new TLRPC.TL_messages_getAttachMenuBot();
         getAttachMenuBot.bot = MessagesController.getInstance(intentAccount).getInputUser(peerId);
         ConnectionsManager.getInstance(intentAccount).sendRequest(getAttachMenuBot, (response1, error1) -> AndroidUtilities.runOnUIThread(() -> {
@@ -5956,10 +5986,10 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
 
     private boolean firstAppUpdateCheck = true;
     public void checkAppUpdate(boolean force, Browser.Progress progress) {
-        if (!ApplicationLoader.isStandaloneBuild() && !ApplicationLoader.isBetaBuild()) {
+        if (!ApplicationLoader.isStandaloneBuild() && !ApplicationLoader.isBetaBuild() && !ApplicationLoader.applicationLoaderInstance.isCustomUpdate()) {
             return;
         }
-        if (!force && !BuildVars.CHECK_UPDATES) {
+        if (!force && !BuildVars.CHECK_UPDATES && !ApplicationLoader.applicationLoaderInstance.isCustomUpdate()) {
             return;
         }
         if (ApplicationLoader.applicationLoaderInstance.isCustomUpdate()) {
@@ -5970,6 +6000,10 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                 final BetaUpdate pendingUpdate = ApplicationLoader.applicationLoaderInstance.getUpdate();
                 if (progress != null) {
                     progress.end();
+                    if (ApplicationLoader.applicationLoaderInstance.updateCheckFailed()) {
+                        Toast.makeText(this, LocaleController.getString(R.string.ChildgramUpdateCheckFailed), Toast.LENGTH_LONG).show();
+                        return;
+                    }
                     if (pendingUpdate == null) {
                         BaseFragment fragment = getLastFragment();
                         if (fragment != null) {
@@ -5977,7 +6011,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                         }
                     }
                 }
-                if (pendingUpdate != null && !ApplicationLoader.applicationLoaderInstance.isDownloadingUpdate() && (first || prevUpdate == null || pendingUpdate.higherThan(prevUpdate))) {
+                if (pendingUpdate != null && !ApplicationLoader.applicationLoaderInstance.isDownloadingUpdate() && (force && BuildVars.CHILDGRAM || first || prevUpdate == null || pendingUpdate.higherThan(prevUpdate))) {
                     ApplicationLoader.applicationLoaderInstance.showCustomUpdateAppPopup(LaunchActivity.this, pendingUpdate, currentAccount);
                 }
             });
@@ -6726,6 +6760,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
 
     @Override
     protected void onPause() {
+        org.telegram.messenger.ChildgramUsageTracker.onForeground(this, false);
         super.onPause();
         isResumed = false;
         pipActivityHandler.onPause();
@@ -6852,6 +6887,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
 
     @Override
     protected void onDestroy() {
+        org.telegram.messenger.ChildgramUsageTracker.onForeground(this, false);
         isActive = false;
         activeInstanceCount--;
         unregisterReceiver(batteryReceiver);
@@ -6964,6 +7000,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
     protected void onResume() {
         super.onResume();
         isResumed = true;
+        AndroidUtilities.runOnUIThread(() -> org.telegram.messenger.ChildgramUsageTracker.onForeground(this, isResumed));
         pipActivityHandler.onResume();
         if (onResumeStaticCallback != null) {
             onResumeStaticCallback.run();

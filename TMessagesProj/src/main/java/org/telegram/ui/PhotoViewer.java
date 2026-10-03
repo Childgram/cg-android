@@ -155,6 +155,7 @@ import com.google.android.gms.cast.framework.CastContext;
 import com.google.android.gms.vision.Frame;
 import com.google.android.gms.vision.face.Face;
 import com.google.android.gms.vision.face.FaceDetector;
+import org.telegram.messenger.ChildgramAccess;
 import org.telegram.messenger.AccountInstance;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.AnimationNotificationsLocker;
@@ -10137,6 +10138,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
     }
 
     private void updatePlayerState(boolean playWhenReady, int playbackState) {
+        org.telegram.messenger.ChildgramUsageTracker.refreshVisibleScreen();
         if (videoPlayer == null && (photoViewerWebView == null || !photoViewerWebView.isControllable())) {
             return;
         }
@@ -10499,6 +10501,11 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
             videoPlayer.setDelegate(new VideoPlayer.VideoPlayerDelegate() {
 
                 private boolean firstState = true;
+
+                @Override
+                public void onPlaybackActivityChanged(boolean isPlaying) {
+                    org.telegram.messenger.ChildgramUsageTracker.refreshVisibleScreen();
+                }
 
                 @Override
                 public void onStateChanged(boolean playWhenReady, int playbackState) {
@@ -13542,7 +13549,14 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
         containerView.invalidate();
     }
 
+    private boolean childgramMediaAllowed(int index) {
+        if (!BuildVars.CHILDGRAM || index < 0 || index >= imagesArr.size()) return true;
+        MessageObject message = imagesArr.get(index);
+        return ChildgramAccess.getInstance(message.currentAccount).canViewMessage(message);
+    }
+
     private String getFileName(int index) {
+        if (!childgramMediaAllowed(index)) return null;
         if (index < 0) {
             return null;
         }
@@ -13599,6 +13613,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
     }
 
     private ImageLocation getImageLocation(int index, long[] size) {
+        if (!childgramMediaAllowed(index)) return null;
         if (index < 0) {
             return null;
         }
@@ -13700,6 +13715,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
     }
 
     private TLObject getFileLocation(int index, long[] size) {
+        if (!childgramMediaAllowed(index)) return null;
         if (index < 0) {
             return null;
         }
@@ -14483,6 +14499,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
         setIsAboutToSwitchToIndex(index, init, animated, false);
     }
     private void setIsAboutToSwitchToIndex(int index, boolean init, boolean animated, boolean force) {
+        if (!childgramMediaAllowed(index)) return;
         if (!init && switchingToIndex == index && !force) {
             return;
         }
@@ -15613,6 +15630,17 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
     }
 
     private void setImageIndex(int index, boolean init, boolean animateCaption, boolean force) {
+        if (!childgramMediaAllowed(index)) {
+            MessageObject message = imagesArr.get(index);
+            ArrayList<MessageObject> savedImages = new ArrayList<>(imagesArr);
+            PhotoViewerProvider savedProvider = placeProvider;
+            ChatActivity source = parentChatActivity;
+            long savedDialog = currentDialogId, savedMerge = mergeDialogId, savedTopic = topicId;
+            closePhoto(false, false);
+            ChildgramAccess.getInstance(message.currentAccount).checkViewMessage(message, source,
+                    () -> openPhoto(savedImages, index, savedDialog, savedMerge, savedTopic, savedProvider));
+            return;
+        }
         if (!force && currentIndex == index || placeProvider == null) {
             return;
         }
@@ -16597,6 +16625,10 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
     }
 
     private void setIndexToImage(ImageReceiver imageReceiver, int index, CropTransform cropTransform) {
+        if (!childgramMediaAllowed(index)) {
+            imageReceiver.setImageBitmap((Bitmap) null);
+            return;
+        }
         imageReceiver.setOrientation(0, false);
         if (!secureDocuments.isEmpty()) {
             if (index >= 0 && index < secureDocuments.size()) {
@@ -17419,6 +17451,13 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
             return false;
         }
 
+        final MessageObject accessMessage = messageObject != null ? messageObject
+                : messages != null && index >= 0 && index < messages.size() ? messages.get(index) : null;
+        if (BuildVars.CHILDGRAM && accessMessage != null && !ChildgramAccess.getInstance(accessMessage.currentAccount).canViewMessage(accessMessage)) {
+            ChildgramAccess.getInstance(accessMessage.currentAccount).checkViewMessage(accessMessage, chatActivity,
+                    () -> openPhoto(messageObject, fileLocation, imageLocation, videoLocation, messages, documents, photos, index, provider, chatActivity, dialogId, mDialogId, topicId, fullScreenVideo, pageBlocksAdapter, embedSeekTime));
+            return false;
+        }
         final PlaceProviderObject object = provider.getPlaceForPhoto(messageObject, fileLocation, index, true, false);
         WindowManager wm = (WindowManager) parentActivity.getSystemService(Context.WINDOW_SERVICE);
         if (attachedToWindow) {
@@ -18654,6 +18693,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
         }
         isVisible = false;
         isVisibleOrAnimating = false;
+        org.telegram.messenger.ChildgramUsageTracker.refreshVisibleScreen();
         cropInitied = false;
         disableShowCheck = true;
         currentMessageObject = null;
@@ -18792,6 +18832,19 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
 
     public boolean isVisible() {
         return isVisible && placeProvider != null;
+    }
+
+    /** Only message videos in the full-screen viewer, excluding round videos and PiP. */
+    public MessageObject getChildgramVideoMessage() {
+        if (!isVisible() || parentActivity == null || isInline || switchingInlineMode || pipAnimationInProgress
+                || AndroidUtilities.isInPictureInPictureMode(parentActivity)
+                || currentMessageObject == null || !currentMessageObject.isVideo() || currentMessageObject.isRoundVideo()) return null;
+        return currentMessageObject;
+    }
+
+    public boolean isChildgramVideoPlaying() {
+        return getChildgramVideoMessage() != null && videoPlayer != null && videoPlayer.player != null
+                && videoPlayer.player.isPlaying();
     }
 
     private void updateMinMax(float scale) {

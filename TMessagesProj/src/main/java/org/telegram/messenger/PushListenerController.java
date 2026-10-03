@@ -1719,6 +1719,9 @@ public class PushListenerController {
 
         @Override
         public boolean hasServices() {
+            if (BuildConfig.CHILDGRAM) {
+                return false;
+            }
             if (hasServices == null) {
                 try {
                     int resultCode = GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(ApplicationLoader.applicationContext);

@@ -1,5 +1,34 @@
 import org.gradle.nativeplatform.platform.internal.DefaultNativePlatform
 
+def childgramDev = project.hasProperty('childgramDev')
+def childgram = childgramDev || project.hasProperty('childgram')
+def telegramApiId = '0'
+def telegramApiHash = ''
+if (childgram) {
+    if (!childgramDev && project.hasProperty('childgramSmoke')) {
+        throw new GradleException('Childgram release builds cannot use smoke credentials.')
+    }
+    def credentials = new Properties()
+    def credentialsFile = rootProject.file('.local/telegram.properties')
+    if (credentialsFile.exists()) {
+        credentialsFile.withInputStream { credentials.load(it) }
+    }
+    telegramApiId = credentials.getProperty('TELEGRAM_API_ID', '').trim()
+    telegramApiHash = credentials.getProperty('TELEGRAM_API_HASH', '').trim()
+    if (!telegramApiId && !telegramApiHash && project.hasProperty('childgramSmoke')) {
+        // Telegram permits its published sample credentials for local testing only.
+        telegramApiId = '4'
+        telegramApiHash = '014b35b6184100b085b0d0572f9b5103'
+        logger.warn('Childgram smoke build: using Telegram public sample credentials for local testing only. Do not distribute this APK.')
+    } else if (!telegramApiId.isInteger() || telegramApiId.toInteger() <= 0 || !(telegramApiHash ==~ /[0-9a-fA-F]{32}/)) {
+        throw new GradleException('Set TELEGRAM_API_ID and TELEGRAM_API_HASH in .local/telegram.properties (see dev/telegram.properties.example). Obtain your keys at https://my.telegram.org/apps. For a local launch check only, explicitly add -PchildgramSmoke.')
+    }
+    telegramApiId = telegramApiId.toInteger().toString()
+    if (!childgramDev && (telegramApiId == '4' || telegramApiHash == '014b35b6184100b085b0d0572f9b5103')) {
+        throw new GradleException('Childgram release builds require your own Telegram API credentials.')
+    }
+}
+
 apply plugin: 'com.android.library'
 apply plugin: 'org.telegram.build-plugin'
 apply plugin: 'idea'
@@ -143,6 +172,16 @@ android {
         minSdkVersion 21
         targetSdkVersion 36
 
+        buildConfigField 'boolean', 'CHILDGRAM_DEV', childgramDev.toString()
+        buildConfigField 'boolean', 'CHILDGRAM', childgram.toString()
+        buildConfigField 'int', 'TELEGRAM_API_ID', telegramApiId
+        buildConfigField 'String', 'TELEGRAM_API_HASH', '"' + telegramApiHash + '"'
+        buildConfigField 'String', 'CHILDGRAM_APPLICATION_ID', '"' + APP_PACKAGE + '"'
+
+        if (childgram) {
+            ndk.abiFilters 'arm64-v8a'
+        }
+
         vectorDrawables.generatedDensities = ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi']
 
         multiDexEnabled true
@@ -151,6 +190,9 @@ android {
             cmake {
                 version '3.22.1'
                 arguments '-DANDROID_STL=c++_static', '-DANDROID_PLATFORM=android-21' //, '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON'
+                if (childgram) {
+                    arguments '-DCMAKE_JOB_POOLS=childgram_compile=4;childgram_link=1', '-DCMAKE_JOB_POOL_COMPILE=childgram_compile', '-DCMAKE_JOB_POOL_LINK=childgram_link'
+                }
                 targets 'tmessages.49'
             }
         }
@@ -158,6 +200,7 @@ android {
 
     buildTypes {
         debug {
+            buildConfigField 'String', 'CHILDGRAM_APPLICATION_ID', '"' + APP_PACKAGE + '.beta"'
             jniDebuggable true
             shrinkResources false
             multiDexEnabled true
@@ -165,7 +208,7 @@ android {
             buildConfigField "String", "BUILD_VERSION_STRING", "\"" + APP_VERSION_NAME + "\""
             buildConfigField "String", "BETA_URL", "\"" + getProps("BETA_PRIVATE_URL") + "\""
             buildConfigField "boolean", "DEBUG_VERSION", "true"
-            buildConfigField "boolean", "DEBUG_PRIVATE_VERSION", "true"
+            buildConfigField "boolean", "DEBUG_PRIVATE_VERSION", (!childgramDev).toString()
             buildConfigField "boolean", "BUNDLE", "false"
             buildConfigField "int", "VERSION_NUM", "0"
         }
@@ -250,7 +293,9 @@ def getProps(String propName) {
         return "";
     }
 }
-apply plugin: 'com.google.gms.google-services'
+if (!childgram) {
+    apply plugin: 'com.google.gms.google-services'
+}
 
 task checkVisibility {
     doFirst {

@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+[[ $# == 0 || ( $# == 1 && "${1:-}" == --device ) ]] || { echo 'Usage: ./dev/check-release [--device]' >&2; exit 1; }
+
+# Inspect the built artifact, not just its Gradle configuration.
+docker run --rm -i --network none --platform linux/amd64 \
+    -v "$PWD:/workspace" -w /workspace childgram-android:36-ndk27 bash -se -- "$@" <<'CHECK'
+set -euo pipefail
+trap 'echo "Release verification failed at line $LINENO." >&2' ERR
+    umask 077
+    apk=TMessagesProj_App/build/outputs/apk/afat/release/app.apk
+    out=.local/checks/release
+    buildtools="$ANDROID_HOME/build-tools/36.0.0"
+    mkdir -p "$out"
+    "$buildtools/apksigner" verify --verbose --print-certs "$apk" > "$out/signature.txt"
+    expected=$(keytool -exportcert -keystore .local/signing/childgram-release.p12 \
+        -storepass:file .local/signing/password.txt -alias childgram | sha256sum | cut -d " " -f 1)
+    [[ "$expected" == "$(tr -d "[:space:]" < dev/release-certificate.sha256)" ]] || { echo "Release key differs from the recorded public certificate." >&2; exit 1; }
+    actual=$(sed -n "s/^Signer #1 certificate SHA-256 digest: //p" "$out/signature.txt")
+    [[ "$actual" == "$expected" ]] || { echo "Unexpected APK signing certificate." >&2; exit 1; }
+    "$buildtools/aapt" dump badging "$apk" > "$out/badging.txt"
+    grep -q "^package: name='org[.]childgram' " "$out/badging.txt"
+    version_code=$(sed -n 's/^CHILDGRAM_VERSION_CODE=//p' gradle.properties)
+    version_name=$(sed -n 's/^CHILDGRAM_VERSION_NAME=//p' gradle.properties)
+    grep -Fq "versionCode='$version_code'" "$out/badging.txt"
+    grep -Fq "versionName='$version_name'" "$out/badging.txt"
+    if grep -q "^application-debuggable" "$out/badging.txt"; then
+        echo "Release APK is debuggable." >&2; exit 1
+    fi
+    grep -q "^application-label:'Childgram'$" "$out/badging.txt"
+    grep -q "^native-code: 'arm64-v8a'$" "$out/badging.txt"
+    "$buildtools/aapt" dump xmltree "$apk" AndroidManifest.xml > "$out/manifest.txt"
+    for authority in org.childgram.provider org.childgram.notification_image_provider org.childgram.call_sound_provider; do
+        grep -Fq "\"$authority\"" "$out/manifest.txt"
+    done
+    "$buildtools/aapt" dump --values resources "$apk" > "$out/resources.txt"
+    grep -A3 "string/childgram_account_type" "$out/resources.txt" | grep -Fq '"org.childgram"'
+    config=TMessagesProj/build/generated/source/buildConfig/release/org/telegram/messenger/BuildConfig.java
+    grep -Fq "boolean CHILDGRAM = true;" "$config"
+    grep -Fq "boolean DEBUG_VERSION = false;" "$config"
+    grep -Fq "boolean CHILDGRAM_DEV = false;" "$config"
+    grep -Fq "String CHILDGRAM_APPLICATION_ID = \"org.childgram\";" "$config"
+    sha256sum "$apk" > "$out/apk.sha256"
+    printf "Release verified: org.childgram; Childgram enabled; non-debuggable; ARM64.\nCertificate SHA-256: %s\n" "$actual"
+    cat "$out/apk.sha256"
+    if [[ "${1:-}" == --device ]]; then
+        classes=TMessagesProj/build/intermediates/runtime_library_classes_jar/release/bundleLibRuntimeToJarRelease/classes.jar
+        android="$ANDROID_HOME/platforms/android-36/android.jar"
+        mkdir -p "$out/classes" "$out/dex"
+        javac -cp "$classes:$android" -d "$out/classes" \
+            dev/tests/ChildgramReleaseInstrumentation.java dev/tests/ChildgramUsageStorageInstrumentation.java \
+            dev/tests/ChildgramUpdateInstrumentation.java
+        cat > "$out/AndroidManifest.xml" <<EOF
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.childgram.releasechecks">
+    <application android:label="Childgram release checks" />
+    <instrumentation android:name="org.telegram.messenger.ChildgramReleaseInstrumentation" android:targetPackage="org.childgram" />
+</manifest>
+EOF
+        jar cf "$out/tests.jar" -C "$out/classes" .
+        "$buildtools/d8" --min-api 26 --lib "$android" --classpath "$classes" --output "$out/dex" "$out/tests.jar"
+        "$buildtools/aapt2" link -I "$android" --manifest "$out/AndroidManifest.xml" --min-sdk-version 26 --target-sdk-version 34 -o "$out/tests-unaligned.apk"
+        jar uf "$out/tests-unaligned.apk" -C "$out/dex" classes.dex
+        "$buildtools/zipalign" -f 4 "$out/tests-unaligned.apk" "$out/tests.apk"
+        "$buildtools/apksigner" sign --ks .local/signing/childgram-release.p12 \
+            --ks-key-alias childgram --ks-pass file:.local/signing/password.txt "$out/tests.apk"
+        # Same package/version, a deliberately different test-only signing key.
+        if [[ ! -f "$out/fixture.keystore" ]]; then
+            keytool -genkeypair -noprompt -keystore "$out/fixture.keystore" -storepass android \
+                -keypass android -alias fixture -dname 'CN=Local Update Fixture' -keyalg RSA -validity 365 >/dev/null 2>&1
+        fi
+        cat > "$out/fixture-manifest.xml" <<EOF
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.childgram"
+    android:versionCode="$version_code" android:versionName="$version_name">
+    <application android:hasCode="false" android:label="Local signing fixture" />
+</manifest>
+EOF
+        "$buildtools/aapt2" link -I "$android" --manifest "$out/fixture-manifest.xml" --min-sdk-version 26 -o "$out/fixture-unaligned.apk"
+        "$buildtools/zipalign" -f 4 "$out/fixture-unaligned.apk" "$out/wrong-signer.apk"
+        "$buildtools/apksigner" sign --ks "$out/fixture.keystore" --ks-key-alias fixture --ks-pass pass:android "$out/wrong-signer.apk"
+    fi
+CHECK
+
+if [[ "${1:-}" == --device ]]; then
+    ./dev/emulator adb install -r .local/checks/release/tests.apk
+    ./dev/emulator adb shell mkdir -p /sdcard/Android/data/org.childgram/files/update-checks
+    ./dev/emulator adb push .local/checks/release/wrong-signer.apk /sdcard/Android/data/org.childgram/files/update-checks/wrong-signer.apk
+    result=$(./dev/emulator adb shell am instrument -w org.childgram.releasechecks/org.telegram.messenger.ChildgramReleaseInstrumentation)
+    ./dev/emulator adb shell rm -f /sdcard/Android/data/org.childgram/files/update-checks/wrong-signer.apk
+    printf '%s\n' "$result"
+    [[ "$result" == *'INSTRUMENTATION_CODE: -1'* ]] && [[ "$result" == *'status=passed'* ]]
+fi

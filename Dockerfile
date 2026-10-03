@@ -33,6 +33,9 @@ RUN sdkmanager \
     "ndk;${ANDROID_NDK_VERSION}" \
     "cmake;3.22.1"
 
+# The pinned Media3 submodule still compiles against API 35.
+RUN sdkmanager --sdk_root="${ANDROID_HOME}" "platforms;android-35" "build-tools;35.0.0"
+
 CMD mkdir -p /home/source/TMessagesProj/build/outputs/apk && \
     mkdir -p /home/gradle/TMessagesProj/build/outputs/bundle && \
     mkdir -p /home/source/TMessagesProj/build/outputs/native-debug-symbols && \

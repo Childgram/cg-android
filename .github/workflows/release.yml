@@ -1,0 +1,81 @@
+name: Prepare Android release draft
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'Childgram/cg-android' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: Free space on the disposable GitHub runner
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          df -h .
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+      - name: Check release metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 -m unittest discover -s dev/tests -p 'test_release.py' -v
+          python3 dev/release.py preflight
+          test -s dev/release-notes.md
+      - name: Restore the existing release identity
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          CHILDGRAM_RELEASE_KEY_BASE64: ${{ secrets.CHILDGRAM_RELEASE_KEY_BASE64 }}
+          CHILDGRAM_RELEASE_KEY_PASSWORD: ${{ secrets.CHILDGRAM_RELEASE_KEY_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import base64, os, pathlib, re
+          os.umask(0o077)
+          names = ('TELEGRAM_API_ID', 'TELEGRAM_API_HASH', 'CHILDGRAM_RELEASE_KEY_BASE64', 'CHILDGRAM_RELEASE_KEY_PASSWORD')
+          assert all(os.environ.get(name) for name in names), 'Configure the four release environment secrets first'
+          assert re.fullmatch(r'[1-9][0-9]*', os.environ['TELEGRAM_API_ID']), 'Invalid API ID'
+          assert re.fullmatch(r'[0-9a-fA-F]{32}', os.environ['TELEGRAM_API_HASH']), 'Invalid API hash'
+          password = os.environ['CHILDGRAM_RELEASE_KEY_PASSWORD']
+          assert '\n' not in password and '\r' not in password, 'Signing password must be one line'
+          local = pathlib.Path('.local')
+          (local / 'signing').mkdir(parents=True)
+          (local / 'telegram.properties').write_text('TELEGRAM_API_ID=' + os.environ['TELEGRAM_API_ID'] + '\nTELEGRAM_API_HASH=' + os.environ['TELEGRAM_API_HASH'] + '\n')
+          (local / 'signing/childgram-release.p12').write_bytes(base64.b64decode(os.environ['CHILDGRAM_RELEASE_KEY_BASE64'], validate=True))
+          (local / 'signing/password.txt').write_text(password + '\n')
+          PY
+      - name: Build and verify signed ARM64 APK in Docker
+        run: |
+          ./dev/build --release
+          sudo chown -R "$(id -u):$(id -g)" .local TMessagesProj_App/build
+      - name: Package release assets
+        run: python3 dev/release.py package --output .local/release-assets
+      - name: Create a draft for human review
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(sed -n 's/^CHILDGRAM_VERSION_NAME=//p' gradle.properties)
+          args=()
+          if [[ "$version" == *-* ]]; then args+=(--prerelease); fi
+          gh release create "v$version" --repo Childgram/cg-android --target "$GITHUB_SHA" \
+            --draft "${args[@]}" --title "Childgram $version" --notes-file .local/release-assets/notes.md \
+            .local/release-assets/*.apk .local/release-assets/android.json \
+            .local/release-assets/SHA256SUMS .local/release-assets/release-certificate.sha256
+      - name: Remove signing material from the runner
+        if: always()
+        run: |
+          sudo rm -rf .local/signing
+          sudo rm -f .local/telegram.properties

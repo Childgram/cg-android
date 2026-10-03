@@ -292,6 +292,16 @@ public class Browser {
         if (context == null || uri == null) {
             return;
         }
+        if (BuildVars.CHILDGRAM) {
+            // All Telegram destinations still pass through LaunchActivity's access policy.
+            uri = childgramTelegramUri(uri);
+            if (isInternalUri(uri, null)) {
+                openAsInternalIntent(context, uri.toString(), forceNotInternalForApps, forceRequest, inCaseLoading);
+            } else {
+                openInExternalBrowser(context, uri.toString(), allowIntent, getBrowserPackageName(browser));
+            }
+            return;
+        }
         final int currentAccount = UserConfig.selectedAccount;
         boolean[] forceBrowser = new boolean[]{false};
         boolean internalUri = isInternalUri(uri, forceBrowser);
@@ -453,6 +463,7 @@ public class Browser {
     }
     public static boolean openAsInternalIntent(Context context, String url, boolean forceNotInternalForApps, boolean forceRequest, Progress progress) {
         if (url == null) return false;
+        if (BuildVars.CHILDGRAM) url = childgramTelegramUri(Uri.parse(url)).toString();
         LaunchActivity activity = null;
         if (AndroidUtilities.findActivity(context) instanceof LaunchActivity) {
             activity = (LaunchActivity) AndroidUtilities.findActivity(context);
@@ -484,6 +495,10 @@ public class Browser {
     }
 
     public static boolean openInTelegramBrowser(Context context, String url, Browser.Progress progress) {
+        if (BuildVars.CHILDGRAM) {
+            openUrl(context, Uri.parse(url), false, false, false, progress, null, false, false, false);
+            return true;
+        }
         if (LaunchActivity.instance != null) {
             BottomSheetTabs tabs = LaunchActivity.instance.getBottomSheetTabs();
             if (tabs != null && tabs.tryReopenTab(url) != null) {
@@ -510,14 +525,36 @@ public class Browser {
         if (url == null) return false;
         try {
             Uri uri = Uri.parse(url);
+            if (BuildVars.CHILDGRAM) {
+                uri = childgramTelegramUri(uri);
+                if (isInternalUri(uri, null)) {
+                    return openAsInternalIntent(context, uri.toString());
+                }
+            }
             final boolean isIntentScheme = uri.getScheme() != null && uri.getScheme().equalsIgnoreCase("intent");
             if (isIntentScheme && !allowIntent) return false;
+            if (BuildVars.CHILDGRAM && isIntentScheme) {
+                final Intent parsed = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
+                final Uri target = parsed.getData();
+                if (target != null && isInternalUri(target, null)) {
+                    return openAsInternalIntent(context, target.toString());
+                }
+                final String fallback = parsed.getStringExtra("browser_fallback_url");
+                if (fallback != null && (fallback.startsWith("https://") || fallback.startsWith("http://"))) {
+                    return openInExternalBrowser(context, fallback, false, browser);
+                }
+                return target != null && ("https".equalsIgnoreCase(target.getScheme()) || "http".equalsIgnoreCase(target.getScheme()))
+                        && openInExternalBrowser(context, target.toString(), false, browser);
+            }
             final Intent intent = isIntentScheme ?
                     Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME) :
                     new Intent(Intent.ACTION_VIEW, uri);
             if (!TextUtils.isEmpty(browser)) {
                 intent.setPackage(browser);
+            } else if (BuildVars.CHILDGRAM && ("https".equalsIgnoreCase(uri.getScheme()) || "http".equalsIgnoreCase(uri.getScheme()))) {
+                intent.setSelector(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_BROWSER));
             }
+            if (!(context instanceof Activity)) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             intent.putExtra(android.provider.Browser.EXTRA_CREATE_NEW_TAB, true);
             intent.putExtra(android.provider.Browser.EXTRA_APPLICATION_ID, context.getPackageName());
             context.startActivity(intent);
@@ -526,6 +563,16 @@ public class Browser {
             FileLog.e(e);
         }
         return false;
+    }
+
+    private static Uri childgramTelegramUri(Uri uri) {
+        final String host = uri.getHost();
+        final String path = uri.getPath();
+        if (host != null && path != null && path.startsWith("/s/")
+                && ("t.me".equalsIgnoreCase(host) || "telegram.me".equalsIgnoreCase(host) || "telegram.dog".equalsIgnoreCase(host))) {
+            return uri.buildUpon().path(path.substring(2)).build();
+        }
+        return uri;
     }
 
     public static boolean isTonsite(String url) {
@@ -556,6 +603,7 @@ public class Browser {
 
     public static boolean openInExternalApp(Context context, String url, boolean allowIntent) {
         if (url == null) return false;
+        if (BuildVars.CHILDGRAM) return openInExternalBrowser(context, url, allowIntent);
         try {
             if (isTonsite(url) || isInternalUrl(url, null)) return false;
             Uri uri = Uri.parse(url);
@@ -678,6 +726,8 @@ public class Browser {
     }
 
     public static boolean isInternalUri(Uri uri, boolean all, boolean[] forceBrowser) {
+        if (BuildVars.CHILDGRAM && uri != null) uri = childgramTelegramUri(uri);
+        if (BuildVars.CHILDGRAM && uri != null && "intent".equalsIgnoreCase(uri.getScheme())) return false;
         String host = AndroidUtilities.getHostAuthority(uri);
         host = host != null ? host.toLowerCase() : "";
 
@@ -739,7 +789,7 @@ public class Browser {
                 }
                 return true;
             }
-        } else if ("telegram.org".equals(host) && uri != null && uri.getPath() != null && uri.getPath().startsWith("/blog/")) {
+        } else if (!BuildVars.CHILDGRAM && "telegram.org".equals(host) && uri != null && uri.getPath() != null && uri.getPath().startsWith("/blog/")) {
             return true;
         } else if (all) {
             if (host.endsWith("telegram.org") || host.endsWith("telegra.ph") || host.endsWith("telesco.pe")) {

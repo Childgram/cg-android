@@ -8,6 +8,8 @@
 
 package org.telegram.ui.Adapters;
 
+import org.telegram.messenger.ChildgramAccess;
+import org.telegram.messenger.BuildVars;
 import static org.telegram.messenger.AndroidUtilities.dp;
 import static org.telegram.ui.PremiumPreviewFragment.applyNewSpan;
 
@@ -558,6 +560,21 @@ public class MentionsAdapter extends RecyclerListView.SelectionAdapter implement
     }
 
     private void processFoundUser(TLRPC.User user) {
+        if (BuildVars.CHILDGRAM && user != null && user.bot && !ChildgramAccess.getInstance(currentAccount).isAllowed(user.id)) {
+            contextUsernameReqid = 0;
+            noUserName = true;
+            if (delegate != null) delegate.onContextSearch(false);
+            final String username = searchingContextUsername;
+            final int account = currentAccount;
+            final long sourceDialog = dialog_id;
+            ChildgramAccess.getInstance(currentAccount).check(user.id, parentFragment, () -> {
+                if (account == currentAccount && sourceDialog == dialog_id && TextUtils.equals(username, searchingContextUsername)) {
+                    noUserName = false;
+                    processFoundUser(user);
+                }
+            });
+            return;
+        }
         contextUsernameReqid = 0;
         locationProvider.stop();
         if (user != null && user.bot && user.bot_inline_placeholder != null) {
@@ -822,6 +839,19 @@ public class MentionsAdapter extends RecyclerListView.SelectionAdapter implement
     }
 
     private void searchForContextBotResults(final boolean cache, final TLRPC.User user, final String query, final String offset) {
+        final int account = currentAccount;
+        final long sourceDialog = dialog_id;
+        final String username = searchingContextUsername;
+        if (BuildVars.CHILDGRAM && user != null && !ChildgramAccess.getInstance(currentAccount).isAllowed(user.id)) {
+            if (delegate != null) delegate.onContextSearch(false);
+            ChildgramAccess.getInstance(currentAccount).check(user.id, parentFragment, () -> {
+                if (account == currentAccount && sourceDialog == dialog_id && foundContextBot != null && foundContextBot.id == user.id
+                        && TextUtils.equals(username, searchingContextUsername) && TextUtils.equals(query, searchingContextQuery)) {
+                    searchForContextBotResults(cache, user, query, offset);
+                }
+            });
+            return;
+        }
         if (contextQueryReqid != 0) {
             ConnectionsManager.getInstance(currentAccount).cancelRequest(contextQueryReqid, true);
             contextQueryReqid = 0;
@@ -842,6 +872,10 @@ public class MentionsAdapter extends RecyclerListView.SelectionAdapter implement
         final String key = dialog_id + "_" + query + "_" + offset + "_" + dialog_id + "_" + user.id + "_" + (user.bot_inline_geo && lastKnownLocation.getLatitude() != -1000 ? lastKnownLocation.getLatitude() + lastKnownLocation.getLongitude() : "");
         final MessagesStorage messagesStorage = MessagesStorage.getInstance(currentAccount);
         RequestDelegate requestDelegate = (response, error) -> AndroidUtilities.runOnUIThread(() -> {
+            if (BuildVars.CHILDGRAM && (account != currentAccount || sourceDialog != dialog_id || foundContextBot == null || foundContextBot.id != user.id
+                    || !TextUtils.equals(username, searchingContextUsername))) {
+                return;
+            }
             if (!query.equals(searchingContextQuery)) {
                 return;
             }

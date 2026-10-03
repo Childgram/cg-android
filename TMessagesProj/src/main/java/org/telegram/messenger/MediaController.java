@@ -3622,6 +3622,10 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
         if (messageObject == null) {
             return false;
         }
+        if (BuildVars.CHILDGRAM && !ChildgramAccess.getInstance(messageObject.currentAccount).canViewMessage(messageObject)) {
+            ChildgramAccess.getInstance(messageObject.currentAccount).checkViewMessage(messageObject, null, () -> playMessage(messageObject, silent));
+            return false;
+        }
         isSilent = silent;
         checkVolumeBarUI();
         if ((audioPlayer != null || videoPlayer != null) && isSamePlayingMessage(messageObject)) {

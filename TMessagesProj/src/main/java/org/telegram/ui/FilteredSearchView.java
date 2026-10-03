@@ -32,6 +32,8 @@ import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import org.telegram.messenger.BuildVars;
+import org.telegram.messenger.ChildgramAccess;
 import org.telegram.messenger.AccountInstance;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.AnimationNotificationsLocker;
@@ -1122,6 +1124,12 @@ public class FilteredSearchView extends FrameLayout implements NotificationCente
         }
         if (uiCallback.actionModeShowing()) {
             uiCallback.toggleItemSelection(message, view, a);
+            return;
+        }
+        if (BuildVars.CHILDGRAM && !ChildgramAccess.getInstance(message.currentAccount).canViewMessage(message)) {
+            final int originalIndex = index;
+            ChildgramAccess.getInstance(message.currentAccount).checkViewMessage(message, parentFragment,
+                    () -> onItemClick(originalIndex, view, message, a));
             return;
         }
         if (view instanceof DialogCell) {

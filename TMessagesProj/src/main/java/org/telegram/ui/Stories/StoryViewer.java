@@ -52,6 +52,7 @@ import androidx.viewpager.widget.ViewPager;
 import androidx.media3.exoplayer.ExoPlayer;
 import org.telegram.ui.AspectRatioFrameLayout;
 
+import org.telegram.messenger.ChildgramAccess;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.AnimationNotificationsLocker;
 import org.telegram.messenger.BotWebViewVibrationEffect;
@@ -373,6 +374,13 @@ public class StoryViewer implements NotificationCenter.NotificationCenterDelegat
         open(UserConfig.selectedAccount, context, storyItem, peerIds, position, storiesList, userStories, placeProvider, reversed);
     }
     public void open(int account, Context context, TL_stories.StoryItem storyItem, ArrayList<Long> peerIds, int position, StoriesController.StoriesList storiesList, TL_stories.PeerStories userStories, PlaceProvider placeProvider, boolean reversed) {
+        if (BuildVars.CHILDGRAM && peerIds != null && position >= 0 && position < peerIds.size()) {
+            long id = peerIds.get(position);
+            if (!ChildgramAccess.getInstance(account).isAllowed(id)) {
+                ChildgramAccess.getInstance(account).check(id, LaunchActivity.getLastFragment(), () -> open(account, context, storyItem, peerIds, position, storiesList, userStories, placeProvider, reversed));
+                return;
+            }
+        }
         if (!isContextSafe(context)) {
             doOnAnimationReadyRunnables.clear();
             return;
@@ -2962,6 +2970,7 @@ public class StoryViewer implements NotificationCenter.NotificationCenterDelegat
                 for (int i = 0; i < allStories.size(); i++) {
                     TL_stories.PeerStories userStories = allStories.get(i);
                     long dialogId = DialogObject.getPeerDialogId(userStories.peer);
+                    if (BuildVars.CHILDGRAM && !ChildgramAccess.getInstance(currentAccount).isAllowed(dialogId)) continue;
                     if (storiesListPlaceProvider.onlyUnreadStories && !storiesController.hasUnreadStories(dialogId)) {
                         continue;
                     }

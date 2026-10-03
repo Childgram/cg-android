@@ -42,6 +42,7 @@ import org.telegram.messenger.AccountInstance;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.BuildConfig;
+import org.telegram.messenger.ChildgramUsageTracker;
 import org.telegram.messenger.ContactsController;
 import org.telegram.messenger.DownloadController;
 import org.telegram.messenger.FileLoader;
@@ -543,6 +544,7 @@ public abstract class BaseFragment {
     @CallSuper
     public void onResume() {
         isPaused = false;
+        ChildgramUsageTracker.refreshVisibleScreen();
         if (actionBar != null) {
             actionBar.onResume();
         }
@@ -558,6 +560,7 @@ public abstract class BaseFragment {
             actionBar.onPause();
         }
         isPaused = true;
+        ChildgramUsageTracker.refreshVisibleScreen();
         try {
             if (visibleDialog != null && visibleDialog.isShowing() && dismissDialogOnPause(visibleDialog)) {
                 visibleDialog.dismiss();
@@ -759,6 +762,7 @@ public abstract class BaseFragment {
 
     public void onBecomeFullyVisible() {
         isFullyVisible = true;
+        ChildgramUsageTracker.refreshVisibleScreen();
         AccessibilityManager mgr = (AccessibilityManager) ApplicationLoader.applicationContext.getSystemService(Context.ACCESSIBILITY_SERVICE);
         if (mgr.isEnabled()) {
             ActionBar actionBar = getActionBar();
@@ -804,6 +808,7 @@ public abstract class BaseFragment {
 
     public void onBecomeFullyHidden() {
         isFullyVisible = false;
+        ChildgramUsageTracker.refreshVisibleScreen();
         updateSheetsVisibility();
     }
 

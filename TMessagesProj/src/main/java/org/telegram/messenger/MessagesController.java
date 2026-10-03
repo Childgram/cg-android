@@ -8700,6 +8700,7 @@ public class MessagesController extends BaseController implements NotificationCe
     }
 
     public void blockPeer(long id) {
+        ChildgramAccess.getInstance(currentAccount).invalidateBot(id);
         TLRPC.User user = null;
         TLRPC.Chat chat = null;
         if (id > 0) {
@@ -15541,6 +15542,10 @@ public class MessagesController extends BaseController implements NotificationCe
         if (user == null) {
             return;
         }
+        if (BuildVars.CHILDGRAM && !ChildgramAccess.getInstance(currentAccount).isAllowed(user.id)) {
+            ChildgramAccess.getInstance(currentAccount).check(user.id, null, () -> sendBotStart(user, botHash));
+            return;
+        }
         TLRPC.TL_messages_startBot req = new TLRPC.TL_messages_startBot();
         req.bot = getInputUser(user);
         req.peer = getInputPeer(user.id);
@@ -15642,6 +15647,16 @@ public class MessagesController extends BaseController implements NotificationCe
 
         TLObject request;
 
+        if (BuildVars.CHILDGRAM && user.id == getUserConfig().getClientUserId() && !ChildgramAccess.getInstance(currentAccount).isAllowed(-chatId)) {
+            ChildgramAccess.deny(fragment);
+            if (onError != null) onError.run(null);
+            if (processInvitedUsers != null) processInvitedUsers.run(null);
+            return;
+        }
+        if (BuildVars.CHILDGRAM && user.bot && !ChildgramAccess.getInstance(currentAccount).isAllowed(user.id)) {
+            ChildgramAccess.getInstance(currentAccount).check(user.id, fragment, () -> addUserToChat(chatId, user, forwardCount, botHash, fragment, ignoreIfAlreadyExists, onFinishRunnable, onError, processInvitedUsers));
+            return;
+        }
         final TLRPC.Chat chat = getChat(chatId); final boolean isChannel = ChatObject.isChannel(chat);
         final boolean isMegagroup = isChannel && chat.megagroup;
         TLRPC.InputUser inputUser = getInputUser(user);
@@ -19180,6 +19195,7 @@ public class MessagesController extends BaseController implements NotificationCe
                 getMessagesStorage().getStorageQueue().postRunnable(() -> AndroidUtilities.runOnUIThread(() -> {
                     long id = MessageObject.getPeerId(finalUpdate.peer_id);
                     if (finalUpdate.blocked) {
+                        ChildgramAccess.getInstance(currentAccount).invalidateBot(id);
                         if (blockePeers.indexOfKey(id) < 0) {
                             blockePeers.put(id, 1);
                         }
@@ -25216,11 +25232,11 @@ public class MessagesController extends BaseController implements NotificationCe
     }
 
     public boolean isWebBrowserInAppEnabled() {
-        return webBrowserSettings != null && !webBrowserSettings.open_external_browser;
+        return !BuildVars.CHILDGRAM && webBrowserSettings != null && !webBrowserSettings.open_external_browser;
     }
 
     public boolean isWebBrowserOpenInApp(String url) {
-        return webBrowserSettings != null && url != null && !isWebBrowserOpenInExternal(webBrowserSettings, url);
+        return !BuildVars.CHILDGRAM && webBrowserSettings != null && url != null && !isWebBrowserOpenInExternal(webBrowserSettings, url);
     }
 
 

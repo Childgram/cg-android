@@ -8,6 +8,8 @@
 
 package org.telegram.ui.Components;
 
+import org.telegram.messenger.ChildgramAccess;
+import org.telegram.messenger.ApplicationLoader;
 import static org.telegram.messenger.AndroidUtilities.dp;
 import static org.telegram.messenger.AndroidUtilities.dpf2;
 import static org.telegram.messenger.AndroidUtilities.lerp;
@@ -258,6 +260,7 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
     private ChatAttachRestrictedLayout restrictedLayout;
     public ImageUpdater parentImageUpdater;
     public boolean destroyed;
+    private int childgramBotRequest;
     public boolean allowEnterCaption;
     private ChatAttachAlertDocumentLayout.DocumentSelectActivityDelegate documentsDelegate;
     private ChatAttachAlertAudioLayout.AudioSelectDelegate audioSelectDelegate;
@@ -289,6 +292,18 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
     }
 
     public void showBotLayout(long id, String startCommand, boolean justAdded, boolean animated) {
+        final int generation = ++childgramBotRequest;
+        if (BuildVars.CHILDGRAM && !ChildgramAccess.getInstance(currentAccount).isAllowed(id)) {
+            final BaseFragment source = baseFragment != null ? baseFragment : LaunchActivity.getSafeLastFragment();
+            ChildgramAccess.getInstance(currentAccount).check(id, source, () -> {
+                if (generation == childgramBotRequest && !destroyed && isShowing() && !ApplicationLoader.mainInterfacePaused
+                        && UserConfig.selectedAccount == currentAccount && source != null && source.getParentActivity() != null
+                        && LaunchActivity.getSafeLastFragment() == source) {
+                    showBotLayout(id, startCommand, justAdded, animated);
+                }
+            });
+            return;
+        }
         if (botAttachLayouts.get(id) == null || !Objects.equals(startCommand, botAttachLayouts.get(id).getStartCommand()) || botAttachLayouts.get(id).needReload()) {
             if (baseFragment instanceof ChatActivity) {
                 ChatAttachAlertBotWebViewLayout webViewLayout = new ChatAttachAlertBotWebViewLayout(this, getContext(), resourcesProvider);
@@ -2750,6 +2765,7 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
         buttonsRecyclerViewWrapper.addView(buttonsRecyclerView, LayoutHelper.createFrameMatchParent());
         containerView.addView(buttonsRecyclerViewWrapper, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 70, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL));
         buttonsRecyclerView.setOnItemClickListener((view, position) -> {
+            final int generation = ++childgramBotRequest;
             BaseFragment lastFragment = baseFragment;
             if (lastFragment == null) {
                 lastFragment = LaunchActivity.getLastFragment();
@@ -2879,6 +2895,21 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
                 }
             } else if (view instanceof AttachBotButton) {
                 AttachBotButton button = (AttachBotButton) view;
+                long botId = button.attachMenuBot != null ? button.attachMenuBot.bot_id : button.currentUser != null ? button.currentUser.id : 0;
+                if (botId == 0) return;
+                if (BuildVars.CHILDGRAM && !ChildgramAccess.getInstance(currentAccount).isAllowed(botId)) {
+                    final BaseFragment source = lastFragment;
+                    ChildgramAccess.getInstance(currentAccount).check(botId, source, () -> {
+                        long boundBotId = button.attachMenuBot != null ? button.attachMenuBot.bot_id : button.currentUser != null ? button.currentUser.id : 0;
+                        if (generation == childgramBotRequest && boundBotId == botId && !destroyed && isShowing()
+                                && view.isAttachedToWindow() && buttonsRecyclerView.getChildAdapterPosition(view) == position
+                                && !ApplicationLoader.mainInterfacePaused && UserConfig.selectedAccount == currentAccount
+                                && source.getParentActivity() != null && LaunchActivity.getSafeLastFragment() == source) {
+                            buttonsRecyclerView.getOnItemClickListener().onItemClick(view, position);
+                        }
+                    });
+                    return;
+                }
                 if (button.attachMenuBot != null) {
                     if (button.attachMenuBot.inactive) {
                         WebAppDisclaimerAlert.show(getContext(), (allowSendMessage) -> {
@@ -6777,6 +6808,7 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
 
     @Override
     public void dismissInternal() {
+        childgramBotRequest++;
         if (delegate != null) {
             delegate.doOnIdle(this::removeFromRoot);
         } else {
@@ -6866,6 +6898,7 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
 
     @Override
     public void dismiss() {
+        childgramBotRequest++;
         if (currentAttachLayout.onDismiss() || isDismissed()) {
             return;
         }

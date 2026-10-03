@@ -17,8 +17,8 @@ import org.telegram.messenger.regular.BuildConfig;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.Components.AlertsCreator;
-import org.telegram.ui.Components.UpdateAppAlertDialog;
-import org.telegram.ui.Components.UpdateLayout;
+import org.telegram.ui.Components.CustomUpdateAppAlertDialog;
+import org.telegram.ui.Components.CustomUpdateLayout;
 import org.telegram.ui.IUpdateLayout;
 
 import java.io.File;
@@ -248,13 +248,13 @@ public class ApplicationLoaderImpl extends ApplicationLoader {
     @Override
     public IUpdateLayout takeUpdateLayout(Activity activity, ViewGroup sideMenuContainer) {
         if (!isCustomUpdate()) return null;
-        return new UpdateLayout(activity, sideMenuContainer);
+        return new CustomUpdateLayout(activity, sideMenuContainer);
     }
 
     @Override
     public boolean showCustomUpdateAppPopup(Context context, BetaUpdate update, int account) {
         try {
-            (new UpdateAppAlertDialog(context, update, account)).show();
+            (new CustomUpdateAppAlertDialog(context, update, account)).show();
         } catch (Exception e) {
             FileLog.e(e);
         }

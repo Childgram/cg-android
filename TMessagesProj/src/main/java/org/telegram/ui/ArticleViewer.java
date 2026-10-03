@@ -115,6 +115,8 @@ import androidx.viewpager.widget.PagerAdapter;
 import androidx.viewpager.widget.ViewPager;
 
 import org.json.JSONObject;
+import org.telegram.messenger.BuildVars;
+import org.telegram.messenger.ChildgramAccess;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.AnimationNotificationsLocker;
 import org.telegram.messenger.ApplicationLoader;
@@ -5510,6 +5512,18 @@ public class ArticleViewer extends IArticleViewer implements NotificationCenter.
     }
 
     private boolean open(final MessageObject messageObject, TLRPC.WebPage webpage, String url, String webUrl, Browser.Progress progress) {
+        if (BuildVars.CHILDGRAM) {
+            TLRPC.WebPage page = webpage != null ? webpage : messageObject != null && messageObject.messageOwner.media != null
+                    ? messageObject.messageOwner.media.webpage : null;
+            if (page == null || page.cached_page == null || page.cached_page.local == null) {
+                String destination = !TextUtils.isEmpty(webUrl) ? webUrl : !TextUtils.isEmpty(url) ? url : page != null ? page.url : null;
+                if (TextUtils.isEmpty(destination) && page != null && page.cached_page != null) destination = page.cached_page.url;
+                if (sheet != null && !isVisible) sheet.release();
+                if (TextUtils.isEmpty(destination)) return false;
+                Browser.openUrl(parentActivity != null ? parentActivity : ApplicationLoader.applicationContext, destination);
+                return true;
+            }
+        }
         if (parentActivity == null || sheet == null && isVisible && !collapsed) {
             return false;
         }
@@ -6069,6 +6083,11 @@ public class ArticleViewer extends IArticleViewer implements NotificationCenter.
     }
 
     public static void joinChannel(int currentAccount, final BlockChannelCell cell, final TLRPC.Chat channel) {
+        if (BuildVars.CHILDGRAM && !ChildgramAccess.getInstance(currentAccount).isAllowed(-channel.id)) {
+            cell.setState(0, false);
+            ChildgramAccess.deny(null);
+            return;
+        }
         final TLRPC.TL_channels_joinChannel req = new TLRPC.TL_channels_joinChannel();
         req.channel = MessagesController.getInputChannel(channel);
         ConnectionsManager.getInstance(currentAccount).sendRequestTyped(req, (response, error) -> {

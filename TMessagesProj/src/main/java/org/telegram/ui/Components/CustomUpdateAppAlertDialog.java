@@ -24,6 +24,7 @@ import android.widget.TextView;
 import androidx.core.widget.NestedScrollView;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.BetaUpdate;
 import org.telegram.messenger.DocumentObject;
@@ -42,7 +43,7 @@ import org.telegram.ui.Stories.recorder.ButtonWithCounterView;
 
 import java.io.File;
 
-public class UpdateAppAlertDialog extends BottomSheet {
+public class CustomUpdateAppAlertDialog extends BottomSheet {
 
     private BetaUpdate appUpdate;
     private int accountNum;
@@ -143,7 +144,7 @@ public class UpdateAppAlertDialog extends BottomSheet {
         }
     }
 
-    public UpdateAppAlertDialog(Context context, BetaUpdate update, int account) {
+    public CustomUpdateAppAlertDialog(Context context, BetaUpdate update, int account) {
         super(context, false);
         appUpdate = update;
         accountNum = account;
@@ -261,7 +262,7 @@ public class UpdateAppAlertDialog extends BottomSheet {
         textView.setTextColor(Theme.getColor(Theme.key_dialogTextBlack));
         textView.setSingleLine(true);
         textView.setEllipsize(TextUtils.TruncateAt.END);
-        textView.setText(LocaleController.getString(R.string.AppUpdateBeta));
+        textView.setText(LocaleController.getString((BuildVars.CHILDGRAM ? R.string.ChildgramUpdateAvailable : R.string.AppUpdateBeta)));
         linearLayout.addView(textView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP | Gravity.CENTER_HORIZONTAL, 23, 16, 23, 0));
 
         TextView messageTextView = new TextView(getContext());
@@ -269,7 +270,7 @@ public class UpdateAppAlertDialog extends BottomSheet {
         messageTextView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
         messageTextView.setMovementMethod(new AndroidUtilities.LinkMovementMethodMy());
         messageTextView.setLinkTextColor(Theme.getColor(Theme.key_dialogTextLink));
-        messageTextView.setText(LocaleController.formatString(R.string.AppBetaUpdateVersion, appUpdate.version, appUpdate.versionCode));
+        messageTextView.setText(BuildVars.CHILDGRAM ? LocaleController.formatString(R.string.ChildgramUpdateVersion, appUpdate.version) : LocaleController.formatString(R.string.AppBetaUpdateVersion, appUpdate.version, appUpdate.versionCode));
         messageTextView.setGravity(Gravity.CENTER_HORIZONTAL | Gravity.TOP);
         linearLayout.addView(messageTextView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP | Gravity.CENTER_HORIZONTAL, 23, 0, 23, 5));
 
@@ -301,7 +302,7 @@ public class UpdateAppAlertDialog extends BottomSheet {
                 if (file == null) return;
                 Activity activity = AndroidUtilities.findActivity(getContext());
                 if (activity == null) return;
-                AndroidUtilities.openForView(file, "Telegram.apk", "application/vnd.android.package-archive", activity, null, false);
+                AndroidUtilities.openForView(file, BuildVars.CHILDGRAM ? "Childgram.apk" : "Telegram.apk", "application/vnd.android.package-archive", activity, null, false);
                 dismiss();
             });
         } else {

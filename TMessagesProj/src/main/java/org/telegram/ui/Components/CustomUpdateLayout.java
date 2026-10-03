@@ -12,6 +12,7 @@ import android.view.ViewGroup;
 import android.widget.FrameLayout;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.R;
@@ -20,7 +21,7 @@ import org.telegram.ui.IUpdateLayout;
 
 import java.io.File;
 
-public class UpdateLayout extends IUpdateLayout {
+public class CustomUpdateLayout extends IUpdateLayout {
 
     private FrameLayout updateLayout;
     private RadialProgress2 updateLayoutIcon;
@@ -29,7 +30,7 @@ public class UpdateLayout extends IUpdateLayout {
     private final Activity activity;
     private final ViewGroup sideMenuContainer;
 
-    public UpdateLayout(Activity activity, ViewGroup sideMenuContainer) {
+    public CustomUpdateLayout(Activity activity, ViewGroup sideMenuContainer) {
         super(activity, sideMenuContainer);
         this.activity = activity;
         this.sideMenuContainer = sideMenuContainer;
@@ -64,7 +65,7 @@ public class UpdateLayout extends IUpdateLayout {
             } else {
                 final File file = ApplicationLoader.applicationLoaderInstance.getDownloadedUpdateFile();
                 if (file != null) {
-                    AndroidUtilities.openForView(file, "Telegram.apk", "application/vnd.android.package-archive", activity, null, false);
+                    AndroidUtilities.openForView(file, BuildVars.CHILDGRAM ? "Childgram.apk" : "Telegram.apk", "application/vnd.android.package-archive", activity, null, false);
                 }
             }
         });
@@ -85,7 +86,7 @@ public class UpdateLayout extends IUpdateLayout {
         updateTextView.setTextColor(0xffffffff);
         updateTextView.setGravity(Gravity.CENTER);
         updateLayout.addView(updateTextView, LayoutHelper.createFrameMatchParent());
-        updateTextView.setText(LocaleController.getString(R.string.AppUpdateBeta), false);
+        updateTextView.setText(LocaleController.getString((BuildVars.CHILDGRAM ? R.string.ChildgramUpdateAvailable : R.string.AppUpdateBeta)), false);
 
         updateLayoutIcon = new RadialProgress2(updateTextView);
         updateLayoutIcon.setColors(0xffffffff, 0xffffffff, Theme.getColor(Theme.key_featuredStickers_addButton), Theme.getColor(Theme.key_featuredStickers_addButton));
@@ -111,7 +112,7 @@ public class UpdateLayout extends IUpdateLayout {
                 setUpdateText(LocaleController.formatString(R.string.AppUpdateDownloading, (int) (progress * 100)), animated);
             } else {
                 updateLayoutIcon.setIcon(MediaActionDrawable.ICON_DOWNLOAD, true, animated);
-                setUpdateText(LocaleController.getString(R.string.AppUpdateBeta), animated);
+                setUpdateText(LocaleController.getString((BuildVars.CHILDGRAM ? R.string.ChildgramUpdateAvailable : R.string.AppUpdateBeta)), animated);
             }
             if (updateLayout.getTag() != null) {
                 return;

@@ -32,5 +32,6 @@ public class ScreenReceiver extends BroadcastReceiver {
             ApplicationLoader.isScreenOn = true;
         }
         NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.screenStateChanged);
+        ChildgramUsageTracker.refreshVisibleScreen();
     }
 }

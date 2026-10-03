@@ -36,6 +36,9 @@ import androidx.core.view.accessibility.AccessibilityNodeInfoCompat;
 import androidx.customview.widget.ExploreByTouchHelper;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.ApplicationLoader;
+import org.telegram.messenger.BuildVars;
+import org.telegram.messenger.ChildgramAccess;
 import org.telegram.messenger.ContactsController;
 import org.telegram.messenger.Emoji;
 import org.telegram.messenger.FileLog;
@@ -75,6 +78,7 @@ public class BottomSheetTabs extends FrameLayout {
     private final ActionBarLayout actionBarLayout;
 
     private TabsAccessibilityHelper accessibilityHelper;
+    private int childgramOpenGeneration;
 
     public BottomSheetTabs(Context context, ActionBarLayout actionBarLayout) {
         super(context);
@@ -100,6 +104,19 @@ public class BottomSheetTabs extends FrameLayout {
     public void openTab(WebTabData tab) {
         BaseFragment lastFragment = LaunchActivity.getLastFragment();
         if (lastFragment == null || lastFragment.getParentActivity() == null) return;
+        final int generation = ++childgramOpenGeneration;
+        if (BuildVars.CHILDGRAM && tab.articleViewer == null && tab.props != null
+                && !ChildgramAccess.getInstance(tab.props.currentAccount).isAllowed(tab.props.botId)) {
+            final int account = tab.props.currentAccount;
+            ChildgramAccess.getInstance(account).check(tab.props.botId, lastFragment, () -> {
+                if (generation == childgramOpenGeneration && !ApplicationLoader.mainInterfacePaused
+                        && UserConfig.selectedAccount == account && LaunchActivity.getLastFragment() == lastFragment
+                        && lastFragment.getParentActivity() != null && getTabs(account).contains(tab)) {
+                    openTab(tab);
+                }
+            });
+            return;
+        }
         if (lastFragment instanceof ChatActivity) {
             if (((ChatActivity) lastFragment).getChatActivityEnterView() != null) {
                 ((ChatActivity) lastFragment).getChatActivityEnterView().closeKeyboard();

@@ -1,5 +1,6 @@
 package org.telegram.ui.web;
 
+import org.telegram.messenger.ChildgramAccess;
 import static org.telegram.messenger.AndroidUtilities.dp;
 import static org.telegram.messenger.AndroidUtilities.readRes;
 import static org.telegram.messenger.AndroidUtilities.replaceSingleLinkBold;
@@ -1546,6 +1547,14 @@ public abstract class BotWebViewContainer extends FrameLayout implements Notific
             d("onEventReceived ignore " + eventType + " after document change");
             return;
         }
+        if (BuildVars.CHILDGRAM && botUser != null
+                && ("web_app_request_chat".equals(eventType) || "web_app_request_phone".equals(eventType)
+                    || "web_app_data_send".equals(eventType))
+                && !ChildgramAccess.getInstance(currentAccount).isAllowed(botUser.id)) {
+            ChildgramAccess.getInstance(currentAccount).check(botUser.id, LaunchActivity.getSafeLastFragment(),
+                    () -> onEventReceived(proxy, requestContext, eventType, eventData));
+            return;
+        }
         d("onEventReceived " + eventType);
         switch (eventType) {
             case "web_app_allow_scroll": {
@@ -2133,6 +2142,17 @@ public abstract class BotWebViewContainer extends FrameLayout implements Notific
                         return;
                     }
 
+                    if (BuildVars.CHILDGRAM) {
+                        try {
+                            JSONObject data = new JSONObject();
+                            data.put("status", "cancelled");
+                            notifyEvent(account, finalWebView, requestContext, "write_access_requested", data);
+                        } catch (Exception e) {
+                            FileLog.e(e);
+                        }
+                        ChildgramAccess.getInstance(account).deny(org.telegram.ui.LaunchActivity.getSafeLastFragment());
+                        return;
+                    }
                     final String[] status = new String[] { "cancelled" };
                     showDialog(3, new AlertDialog.Builder(getContext())
                         .setTitle(getString(R.string.BotWebViewRequestWriteTitle))
@@ -4303,7 +4323,7 @@ public abstract class BotWebViewContainer extends FrameLayout implements Notific
                         }
                     }
                     if (botWebViewContainer != null && Browser.isInternalUri(uriNew, null)) {
-                        if (!bot && "1".equals(uriNew.getQueryParameter("embed")) && "t.me".equals(uriNew.getAuthority())) {
+                        if (!BuildVars.CHILDGRAM && !bot && "1".equals(uriNew.getQueryParameter("embed")) && "t.me".equals(uriNew.getAuthority())) {
                             return false;
                         }
                         if (MessagesController.getInstance(botWebViewContainer.currentAccount).webAppAllowedProtocols != null &&

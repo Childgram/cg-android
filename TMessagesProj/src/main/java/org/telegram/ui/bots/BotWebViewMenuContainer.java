@@ -1,5 +1,9 @@
 package org.telegram.ui.bots;
 
+import org.telegram.messenger.ChildgramAccess;
+import org.telegram.messenger.BuildVars;
+import org.telegram.messenger.ApplicationLoader;
+import org.telegram.messenger.UserConfig;
 import static org.telegram.messenger.AndroidUtilities.dp;
 import static org.telegram.ui.ActionBar.Theme.key_windowBackgroundWhiteBlackText;
 
@@ -118,6 +122,7 @@ public class BotWebViewMenuContainer extends FrameLayout implements Notification
     private TLObject loadedResponse;
     private long loadedResponseTime;
     private boolean dismissed;
+    private int childgramShowGeneration;
 
     private Boolean wasLightStatusBar;
     private long queryId;
@@ -740,6 +745,7 @@ public class BotWebViewMenuContainer extends FrameLayout implements Notification
 
     @Override
     public void onDetachedFromWindow() {
+        childgramShowGeneration++;
         super.onDetachedFromWindow();
 
         if (springAnimation != null) {
@@ -890,6 +896,19 @@ public class BotWebViewMenuContainer extends FrameLayout implements Notification
      * Shows menu for the bot
      */
     public void show(int currentAccount, long botId, String botUrl) {
+        final int generation = ++childgramShowGeneration;
+        if (BuildVars.CHILDGRAM && !ChildgramAccess.getInstance(currentAccount).isAllowed(botId)) {
+            final ChatActivity source = parentEnterView.getParentFragment();
+            ChildgramAccess.getInstance(currentAccount).check(botId, source, () -> {
+                if (generation == childgramShowGeneration && !ApplicationLoader.mainInterfacePaused
+                        && UserConfig.selectedAccount == currentAccount && parentEnterView.isShown()
+                        && source != null && source == parentEnterView.getParentFragment() && source.getDialogId() == botId
+                        && source.getParentActivity() != null && LaunchActivity.getSafeLastFragment() == source) {
+                    show(currentAccount, botId, botUrl);
+                }
+            });
+            return;
+        }
         dismissed = false;
         if (this.currentAccount != currentAccount || this.botId != botId || !Objects.equals(this.botUrl, botUrl)) {
             isLoaded = false;
@@ -1031,6 +1050,7 @@ public class BotWebViewMenuContainer extends FrameLayout implements Notification
     }
 
     public void dismiss(boolean intoTabs, Runnable callback) {
+        childgramShowGeneration++;
         if (dismissed) {
             return;
         }

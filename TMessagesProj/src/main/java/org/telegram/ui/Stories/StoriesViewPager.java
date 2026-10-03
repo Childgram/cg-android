@@ -14,6 +14,8 @@ import androidx.annotation.Nullable;
 import androidx.viewpager.widget.PagerAdapter;
 import androidx.viewpager.widget.ViewPager;
 
+import org.telegram.messenger.BuildVars;
+import org.telegram.messenger.ChildgramAccess;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.MessageObject;
@@ -252,6 +254,15 @@ public class StoriesViewPager extends ViewPager {
     }
 
     public void setPeerIds(ArrayList<Long> peerIds, int currentAccount, int position) {
+        if (BuildVars.CHILDGRAM) {
+            long selected = position >= 0 && position < peerIds.size() ? peerIds.get(position) : 0;
+            ArrayList<Long> allowed = new ArrayList<>();
+            for (Long id : peerIds) {
+                if (ChildgramAccess.getInstance(currentAccount).isAllowed(id)) allowed.add(id);
+            }
+            peerIds = allowed;
+            position = Math.max(0, allowed.indexOf(selected));
+        }
         this.dialogs = peerIds;
         this.currentAccount = currentAccount;
         setAdapter(null);

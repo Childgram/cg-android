@@ -1,6 +1,25 @@
 apply plugin: 'com.android.application'
 apply plugin: 'org.telegram.build-app-plugin'
 
+def childgramDev = project.hasProperty('childgramDev')
+def childgram = childgramDev || project.hasProperty('childgram')
+def childgramRelease = childgram && !childgramDev
+def childgramSigningPassword = ''
+if (childgramRelease) {
+    if (APP_PACKAGE != 'org.childgram') {
+        throw new GradleException('The Childgram release application ID must be org.childgram.')
+    }
+    def keyFile = rootProject.file('.local/signing/childgram-release.p12')
+    def passwordFile = rootProject.file('.local/signing/password.txt')
+    if (!keyFile.isFile() || !passwordFile.isFile()) {
+        throw new GradleException('Release signing key is missing. Restore .local/signing from backup, or run ./dev/signing-key --create for the first release only.')
+    }
+    childgramSigningPassword = passwordFile.text.trim()
+    if (childgramSigningPassword.length() < 16) {
+        throw new GradleException('The release signing password file is empty or invalid.')
+    }
+}
+
 repositories {
     mavenCentral()
     google()
@@ -49,17 +68,17 @@ android {
 
     signingConfigs {
         debug {
-            storeFile file("../TMessagesProj/config/release.keystore")
-            storePassword RELEASE_STORE_PASSWORD
-            keyAlias RELEASE_KEY_ALIAS
-            keyPassword RELEASE_KEY_PASSWORD
+            storeFile childgramDev ? rootProject.file('.local/debug.keystore') : file("../TMessagesProj/config/release.keystore")
+            storePassword childgramDev ? 'android' : RELEASE_STORE_PASSWORD
+            keyAlias childgramDev ? 'androiddebugkey' : RELEASE_KEY_ALIAS
+            keyPassword childgramDev ? 'android' : RELEASE_KEY_PASSWORD
         }
 
         release {
-            storeFile file("../TMessagesProj/config/release.keystore")
-            storePassword RELEASE_STORE_PASSWORD
-            keyAlias RELEASE_KEY_ALIAS
-            keyPassword RELEASE_KEY_PASSWORD
+            storeFile childgramRelease ? rootProject.file('.local/signing/childgram-release.p12') : file("../TMessagesProj/config/release.keystore")
+            storePassword childgramRelease ? childgramSigningPassword : RELEASE_STORE_PASSWORD
+            keyAlias childgramRelease ? 'childgram' : RELEASE_KEY_ALIAS
+            keyPassword childgramRelease ? childgramSigningPassword : RELEASE_KEY_PASSWORD
         }
     }
 
@@ -142,7 +161,11 @@ android {
         }
         afat {
             ndk {
-                abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
+                if (childgram) {
+                    abiFilters 'arm64-v8a'
+                } else {
+                    abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
+                }
             }
             sourceSets.debug {
                 manifest.srcFile '../TMessagesProj/config/debug/AndroidManifest_SDK23.xml'
@@ -160,12 +183,22 @@ android {
         }
     }
 
-    defaultConfig.versionCode = Integer.parseInt(APP_VERSION_CODE)
+    defaultConfig.versionCode = Integer.parseInt(childgramRelease ? CHILDGRAM_VERSION_CODE : APP_VERSION_CODE)
+
+    if (childgram) {
+        def childgramVariant = childgramDev ? 'afatDebug' : 'afatRelease'
+        def childgramType = childgramDev ? buildTypes.debug : buildTypes.release
+        sourceSets.maybeCreate(childgramVariant).manifest.srcFile rootProject.file('dev/AndroidManifest.xml')
+        sourceSets.getByName(childgramVariant).res.srcDir rootProject.file('dev/res')
+        childgramType.resValue 'string', 'AppName', childgramDev ? 'Childgram Dev' : 'Childgram'
+        childgramType.resValue 'string', 'AppNameBeta', childgramDev ? 'Childgram Dev' : 'Childgram'
+        childgramType.resValue 'string', 'childgram_account_type', APP_PACKAGE + (childgramDev ? '.beta' : '')
+    }
 
     applicationVariants.all { variant ->
         variant.outputs.all { output ->
             outputFileName = "app.apk"
-            output.versionCodeOverride = defaultConfig.versionCode * 10 + variant.productFlavors.get(0).abiVersionCode
+            output.versionCodeOverride = childgramRelease ? defaultConfig.versionCode : defaultConfig.versionCode * 10 + variant.productFlavors.get(0).abiVersionCode
         }
     }
 
@@ -179,7 +212,7 @@ android {
     defaultConfig {
         minSdkVersion 21
         targetSdkVersion 36
-        versionName APP_VERSION_NAME
+        versionName childgramRelease ? CHILDGRAM_VERSION_NAME : APP_VERSION_NAME
         ndkVersion "27.2.12479018"
 
         multiDexEnabled true
@@ -205,4 +238,6 @@ android {
     }
 }
 
-apply plugin: 'com.google.gms.google-services'
+if (!childgram) {
+    apply plugin: 'com.google.gms.google-services'
+}

@@ -45,6 +45,7 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
+import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.BotWebViewVibrationEffect;
 import org.telegram.messenger.ContactsController;
 import org.telegram.messenger.DialogObject;
@@ -495,6 +496,11 @@ public class PrivacyControlActivity extends BaseFragment implements Notification
 
     @Override
     public boolean onFragmentCreate() {
+        if (BuildVars.CHILDGRAM && rulesType == PRIVACY_RULES_TYPE_INVITE) {
+            android.widget.Toast.makeText(ApplicationLoader.applicationContext,
+                LocaleController.getString(R.string.ChildgramAccessDenied), android.widget.Toast.LENGTH_LONG).show();
+            return false;
+        }
         super.onFragmentCreate();
         checkPrivacy();
         updateRows(false);
@@ -902,6 +908,9 @@ public class PrivacyControlActivity extends BaseFragment implements Notification
             if (globalSettings != null && (globalSettings.new_noncontact_peers_require_premium || globalSettings.noncontact_peers_paid_stars > 0)) {
                 final int[] checkTypes = new int[] { PRIVACY_RULES_TYPE_INVITE, PRIVACY_RULES_TYPE_CALLS };
                 for (int type : checkTypes) {
+                    if (BuildVars.CHILDGRAM && type == PRIVACY_RULES_TYPE_INVITE) {
+                        continue;
+                    }
                     final ArrayList<TLRPC.PrivacyRule> inviteRules = ContactsController.getInstance(currentAccount).getPrivacyRules(type);
                     if (type != rulesType && findRule(inviteRules, TLRPC.TL_privacyValueAllowAll.class) != null) {
                         new AlertDialog.Builder(getContext(), resourceProvider)

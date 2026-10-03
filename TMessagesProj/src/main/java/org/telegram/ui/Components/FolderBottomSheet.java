@@ -38,6 +38,8 @@ import androidx.annotation.NonNull;
 import androidx.core.view.ViewCompat;
 import androidx.recyclerview.widget.RecyclerView;
 
+import org.telegram.messenger.BuildVars;
+import org.telegram.messenger.ChildgramAccess;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.BotWebViewVibrationEffect;
 import org.telegram.messenger.ChatObject;
@@ -381,6 +383,10 @@ public class FolderBottomSheet extends BottomSheetWithRecyclerListView {
         for (int i = 0; i < peers.size(); ++i) {
             long did = DialogObject.getPeerDialogId(peers.get(i));
             if (selectedPeers.contains(did)) {
+                if (BuildVars.CHILDGRAM && !deleting && !ChildgramAccess.getInstance(currentAccount).isAllowed(did)) {
+                    ChildgramAccess.deny(getBaseFragment());
+                    return;
+                }
                 inputPeers.add(getBaseFragment().getMessagesController().getInputPeer(did));
             }
         }

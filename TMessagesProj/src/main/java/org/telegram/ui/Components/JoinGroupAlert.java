@@ -24,6 +24,8 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import org.telegram.messenger.BuildVars;
+import org.telegram.messenger.ChildgramAccess;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.BotGuardHelper;
 import org.telegram.messenger.ChatObject;
@@ -203,6 +205,11 @@ public class JoinGroupAlert extends BottomSheet {
             requestTextView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
             requestTextView.setTypeface(AndroidUtilities.bold());
             requestTextView.setOnClickListener((view) -> {
+                if (BuildVars.CHILDGRAM) {
+                    ChildgramAccess.deny(fragment);
+                    dismiss();
+                    return;
+                }
                 AndroidUtilities.runOnUIThread(() -> {
                     if (!isDismissed()) {
                         requestTextView.setVisibility(View.INVISIBLE);
@@ -336,6 +343,11 @@ public class JoinGroupAlert extends BottomSheet {
             joinTextView.setTypeface(AndroidUtilities.bold());
             linearLayout.addView(joinTextView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48, Gravity.START, 14, 0, 14, 14));
             joinTextView.setOnClickListener(v -> {
+                if (BuildVars.CHILDGRAM) {
+                    ChildgramAccess.deny(fragment);
+                    dismiss();
+                    return;
+                }
                 dismiss();
                 final TLRPC.TL_messages_importChatInvite req = new TLRPC.TL_messages_importChatInvite();
                 req.hash = hash;

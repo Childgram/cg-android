@@ -2080,6 +2080,11 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
         if (messages == null || messages.isEmpty()) {
             return 0;
         }
+        if (BuildVars.CHILDGRAM && !ChildgramAccess.getInstance(currentAccount).canSend(peer, replyToTopMsg)) {
+            final long checkedStars = payStars;
+            ChildgramAccess.getInstance(currentAccount).check(peer, null, () -> sendMessage(messages, peer, forwardFromMyName, hideCaption, notify, scheduleDate, scheduleRepeatPeriod, replyToTopMsg, video_timestamp, checkedStars, monoForumPeerId, suggestionParams));
+            return 0;
+        }
         int sendResult = 0;
         long myId = getUserConfig().getClientUserId();
         boolean isChannel = false;
@@ -3648,6 +3653,17 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
         if (messageObject == null || button == null) {
             return;
         }
+        if (BuildVars.CHILDGRAM) {
+            long bot = messageObject.messageOwner.via_bot_id != 0 ? messageObject.messageOwner.via_bot_id : messageObject.getFromChatId();
+            if (bot <= 0) {
+                ChildgramAccess.deny(null);
+                return;
+            }
+            if (!ChildgramAccess.getInstance(currentAccount).isAllowed(bot)) {
+                ChildgramAccess.getInstance(currentAccount).check(bot, null, () -> sendCurrentLocation(messageObject, button));
+                return;
+            }
+        }
         final String key = messageObject.getDialogId() + "_" + messageObject.getId() + "_" + Utilities.bytesToHex(button.getData()) + "_" + (TLKeyboardHelper.isType(button, TL_keyboard.TL_inlineButtonTypeGame.class) ? "1" : "0");
         waitingForLocation.put(key, messageObject);
         locationProvider.start();
@@ -3663,6 +3679,16 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
 
     public void sendNotificationCallback(long dialogId, int msgId, byte[] data) {
         AndroidUtilities.runOnUIThread(() -> {
+            if (BuildVars.CHILDGRAM) {
+                if (dialogId <= 0) {
+                    ChildgramAccess.deny(null);
+                    return;
+                }
+                if (!ChildgramAccess.getInstance(currentAccount).isAllowed(dialogId)) {
+                    ChildgramAccess.getInstance(currentAccount).check(dialogId, null, () -> sendNotificationCallback(dialogId, msgId, data));
+                    return;
+                }
+            }
             final String key = dialogId + "_" + msgId + "_" + Utilities.bytesToHex(data) + "_" + 0;
             waitingForCallback.put(key, true);
 
@@ -3887,6 +3913,15 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
 
     public void sendCallback(final boolean cache, final MessageObject messageObject, final TL_keyboard.KeyboardButtonProto button, TLRPC.InputCheckPasswordSRP srp, TwoStepVerificationActivity passwordFragment, final ChatActivity parentFragment) {
         if (messageObject == null || button == null || parentFragment == null) {
+            return;
+        }
+        final long callbackBot = messageObject.messageOwner.via_bot_id != 0 ? messageObject.messageOwner.via_bot_id : messageObject.getFromChatId();
+        if (BuildVars.CHILDGRAM && callbackBot <= 0) {
+            ChildgramAccess.deny(parentFragment);
+            return;
+        }
+        if (BuildVars.CHILDGRAM && callbackBot > 0 && !ChildgramAccess.getInstance(currentAccount).isAllowed(callbackBot)) {
+            ChildgramAccess.getInstance(currentAccount).check(callbackBot, parentFragment, () -> sendCallback(cache, messageObject, button, srp, passwordFragment, parentFragment));
             return;
         }
         final boolean cacheFinal;
@@ -4206,6 +4241,18 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
         if (peer == null || game == null) {
             return;
         }
+        if (BuildVars.CHILDGRAM) {
+            long target = peer instanceof TLRPC.TL_inputPeerSelf ? getUserConfig().getClientUserId() : DialogObject.getPeerDialogId(peer);
+            long bot = game.id != null && game.id.bot_id != null ? game.id.bot_id.user_id : 0;
+            if (!ChildgramAccess.getInstance(currentAccount).isAllowed(target)) {
+                ChildgramAccess.getInstance(currentAccount).check(target, null, () -> sendGame(peer, game, random_id, taskId));
+                return;
+            }
+            if (bot != 0 && !ChildgramAccess.getInstance(currentAccount).isAllowed(bot)) {
+                ChildgramAccess.getInstance(currentAccount).check(bot, null, () -> sendGame(peer, game, random_id, taskId));
+                return;
+            }
+        }
         TLRPC.TL_messages_sendMedia request = new TLRPC.TL_messages_sendMedia();
         request.peer = peer;
         if (request.peer instanceof TLRPC.TL_inputPeerChannel) {
@@ -4257,6 +4304,17 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
     }
 
     public void sendMessage(SendMessageParams sendMessageParams) {
+        final long accessPeer = sendMessageParams.sendMessageChatArguments != null && sendMessageParams.sendMessageChatArguments.welcomeMessageChatId != 0
+                ? -sendMessageParams.sendMessageChatArguments.welcomeMessageChatId : sendMessageParams.peer;
+        if (BuildVars.CHILDGRAM && !ChildgramAccess.getInstance(currentAccount).canSend(accessPeer, sendMessageParams.replyToTopMsg)) {
+            ChildgramAccess.getInstance(currentAccount).check(accessPeer, null, () -> sendMessage(sendMessageParams));
+            return;
+        }
+        long inlineBot = sendMessageParams.params != null ? Utilities.parseLong(sendMessageParams.params.get("bot")) : 0;
+        if (BuildVars.CHILDGRAM && inlineBot > 0 && !ChildgramAccess.getInstance(currentAccount).isAllowed(inlineBot)) {
+            ChildgramAccess.getInstance(currentAccount).check(inlineBot, null, () -> sendMessage(sendMessageParams));
+            return;
+        }
         final SendMessageChatArguments sendMessageChatArguments = sendMessageParams.sendMessageChatArguments != null ?
                 sendMessageParams.sendMessageChatArguments : SendMessageChatArguments.EMPTY;
         String message = sendMessageParams.message;

@@ -1,5 +1,8 @@
 package org.telegram.ui;
 
+import org.telegram.messenger.ChildgramAccess;
+import org.telegram.messenger.MessagesController;
+import org.telegram.messenger.BuildVars;
 import static org.telegram.messenger.AndroidUtilities.dp;
 import static org.telegram.messenger.AndroidUtilities.replaceSingleLink;
 import static org.telegram.messenger.AndroidUtilities.replaceSingleLinkBold;
@@ -135,6 +138,14 @@ public class OAuthSheet {
         if (!(result instanceof TLRPC.TL_urlAuthResultRequest))
             return;
         final TLRPC.TL_urlAuthResultRequest r = (TLRPC.TL_urlAuthResultRequest) result;
+        if (BuildVars.CHILDGRAM && r.bot != null) {
+            MessagesController.getInstance(currentAccount).putUser(r.bot, false);
+            if (!ChildgramAccess.getInstance(currentAccount).isAllowed(r.bot.id)) {
+                ChildgramAccess.getInstance(currentAccount).check(r.bot.id, LaunchActivity.getSafeLastFragment(),
+                        () -> handle(external, currentAccount, request, result, originUrl, prevResult, matchCode, sentPhoneNumber, webView));
+                return;
+            }
+        }
 
         final BaseFragment fragment = LaunchActivity.getSafeLastFragment();
         if (fragment == null) return;
@@ -393,7 +404,7 @@ public class OAuthSheet {
         });
         final boolean[] allowPhoneNumber = new boolean[1];
         final BottomSheet[] showingMatchCodes = new BottomSheet[1];
-        final Runnable accept = () -> {
+        final Runnable submitAuth = () -> {
             if (login.isLoading()) return;
             if (cancel.isLoading()) return;
 
@@ -432,6 +443,13 @@ public class OAuthSheet {
                     handle(external, selectedAccount[0], request, res, originUrl, r, null, req.share_phone_number, webView);
                 }
             });
+        };
+        final Runnable accept = () -> {
+            if (BuildVars.CHILDGRAM && r.bot != null) {
+                ChildgramAccess.getInstance(selectedAccount[0]).check(r.bot.id, fragment, submitAuth);
+            } else {
+                submitAuth.run();
+            }
         };
         final Runnable beforeAccept = () -> {
             if (!r.match_codes.isEmpty() && TextUtils.isEmpty(selectedMatchCode[0])) {

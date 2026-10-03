@@ -213,6 +213,7 @@ public class BubbleActivity extends BasePermissionsActivity implements INavigati
 
     @Override
     protected void onPause() {
+        org.telegram.messenger.ChildgramUsageTracker.onForeground(this, false);
         super.onPause();
         actionBarLayout.onPause();
         ApplicationLoader.externalInterfacePaused = true;
@@ -225,6 +226,7 @@ public class BubbleActivity extends BasePermissionsActivity implements INavigati
 
     @Override
     protected void onDestroy() {
+        org.telegram.messenger.ChildgramUsageTracker.onForeground(this, false);
         super.onDestroy();
         if (currentAccount != -1) {
             AccountInstance.getInstance(currentAccount).getNotificationsController().setOpenedInBubble(dialogId, false);
@@ -273,6 +275,7 @@ public class BubbleActivity extends BasePermissionsActivity implements INavigati
             passcodeView.onResume();
         }
         instance = this;
+        org.telegram.messenger.ChildgramUsageTracker.onForeground(this, true);
     }
 
     private void onPasscodePause() {

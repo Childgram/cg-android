@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+image="childgram-android:36-ndk27"
+if [[ "${1:-}" == --help ]]; then
+    cat <<'HELP'
+Usage: ./dev/build [--smoke] [Gradle tasks/options...]
+       ./dev/build --release
+       ./dev/build --image
+
+Builds an ARM64 Childgram APK in Docker. Normal builds require
+.local/telegram.properties; --smoke explicitly uses Telegram's public test keys.
+--release builds org.childgram with the existing key in .local/signing/.
+Create that key once with ./dev/signing-key --create, then keep a secure backup.
+Default task: :TMessagesProj_App:assembleAfatDebug
+Output: TMessagesProj_App/build/outputs/apk/afat/debug/app.apk
+Release: TMessagesProj_App/build/outputs/apk/afat/release/app.apk
+HELP
+    exit 0
+fi
+
+docker info >/dev/null
+if [[ "${1:-}" == --image ]] || ! docker image inspect "$image" >/dev/null 2>&1; then
+    # stdin is intentional: no source files or credentials enter the image context.
+    docker build --platform linux/amd64 --progress plain -t "$image" - < Dockerfile
+    [[ "${1:-}" != --image ]] || exit 0
+fi
+
+release=false
+args=(-PchildgramDev -PAPP_PACKAGE=org.childgram.messenger)
+case "${1:-}" in
+    --smoke) args+=(-PchildgramSmoke); shift ;;
+    --release) release=true; args=(-Pchildgram -PAPP_PACKAGE=org.childgram); shift ;;
+esac
+if [[ "${1:-}" == --smoke || "${1:-}" == --release ]]; then
+    echo '--smoke and --release are mutually exclusive.' >&2
+    exit 1
+fi
+if $release && [[ $# != 0 ]]; then
+    echo '--release uses the fixed afatRelease configuration; do not pass extra Gradle arguments.' >&2
+    exit 1
+fi
+if [[ $# == 0 ]]; then
+    if $release; then set -- :TMessagesProj_App:assembleAfatRelease
+    else set -- :TMessagesProj_App:assembleAfatDebug; fi
+fi
+
+if git submodule status --recursive | LC_ALL=C grep '^[+-U]' >/dev/null; then
+    echo 'Submodules are incomplete or differ from upstream. Run:' >&2
+    echo 'git submodule update --init --recursive --depth=1' >&2
+    exit 1
+fi
+
+mkdir -p .local/logs
+chmod 700 .local
+log=".local/logs/build-$(date +%Y%m%d-%H%M%S).log"
+docker run --rm --init --platform linux/amd64 \
+    --cpus 8 --memory 14g \
+    -e GRADLE_USER_HOME=/gradle-cache \
+    -e ANDROID_USER_HOME=/workspace/.local/build-android \
+    -v childgram-gradle:/gradle-cache \
+    -v "$PWD:/workspace" \
+    -v "$PWD/.git:/workspace/.git:ro" \
+    -w /workspace "$image" bash -euc '
+        umask 077
+        if [[ "$1" == -PchildgramDev && ! -f .local/debug.keystore ]]; then
+            keytool -genkeypair -noprompt -keystore .local/debug.keystore \
+                -storepass android -keypass android -alias androiddebugkey \
+                -dname "CN=Childgram Development,O=Childgram,C=ME" \
+                -keyalg RSA -keysize 2048 -validity 10000
+        fi
+        exec gradle --no-daemon --no-watch-fs --no-parallel --max-workers=4 --console=plain \
+            -Dorg.gradle.jvmargs="-Xmx6g -XX:MaxMetaspaceSize=1g" \
+            --project-cache-dir /workspace/.local/gradle-project "$@"
+    ' childgram-build "${args[@]}" "$@" 2>&1 | tee "$log"
+
+if $release; then ./dev/check-release; fi

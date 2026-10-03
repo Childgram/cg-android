@@ -27,6 +27,12 @@ repositories {
 //          licences/                          (~20 KB; pure license text files)
 subprojects {
     plugins.withId('com.android.application') {
+        if (rootProject.hasProperty('childgram') || rootProject.hasProperty('childgramDev')) {
+            androidComponents.beforeVariants(androidComponents.selector().all()) { variant ->
+                def childgramVariant = rootProject.hasProperty('childgramDev') ? 'afatDebug' : 'afatRelease'
+                variant.enable = project.path == ':TMessagesProj_App' && variant.name == childgramVariant
+            }
+        }
         android {
             androidResources {
                 ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~:!optional:!licences:!*stmary*:!*eufb*'

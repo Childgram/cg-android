@@ -263,4 +263,34 @@
     <string name="RemindTodayAt">\'Отправить сегодня в\' HH:mm</string>
     <string name="RemindDayAt">\'Отправить\' d MMM \'в\' HH:mm</string>
     <string name="RemindDayYearAt">\'Напомнить\' d MMM yyyy \'в\' HH:mm</string>
+
+    <!-- Childgram -->
+    <string name="ChildgramAccessDenied">Доступ ограничен. Если вам нужен этот чат, обратитесь к родителям.</string>
+    <string name="ChildgramAccessCheckFailed">Не удалось проверить доступ. Подключитесь к интернету и попробуйте снова.</string>
+    <string name="ChildgramPrivacyCheckFailed">Не удалось проверить настройку приглашений. Повторим проверку при подключении.</string>
+    <string name="ChildgramPrivacyExceptionsChanged">Telegram изменил исключения для приглашений. Попросите родителей проверить их.</string>
+    <string name="ChildgramUsageTitle">Время в чатах</string>
+    <string name="ChildgramUsageSubtitle">Сколько времени на что потрачено</string>
+    <string name="ChildgramUsageTotal">Всего</string>
+    <string name="ChildgramUsageVideo">Из них полноэкранное видео</string>
+    <string name="ChildgramUsageEmpty">В этот день активности нет</string>
+    <string name="ChildgramUsagePrevious">Предыдущий день</string>
+    <string name="ChildgramUsageNext">Следующий день</string>
+    <string name="ChildgramUsageChats">Чаты и экраны</string>
+    <string name="ChildgramUsageDialogs">Список чатов</string>
+    <string name="ChildgramUsageSettings">Настройки</string>
+    <string name="ChildgramUsageContacts">Контакты</string>
+    <string name="ChildgramUsageCalls">Звонки</string>
+    <string name="ChildgramUsageProfile">Профили</string>
+    <string name="ChildgramUsageOther">Другие экраны</string>
+    <string name="ChildgramUsageClear">Очистить старую историю</string>
+    <string name="ChildgramUsageClearInfo">Сохранить сегодня и предыдущие 7 полных дней. Будет удалена только локальная история времени.</string>
+    <string name="ChildgramUsageError">Не удалось загрузить историю времени</string>
+    <string name="ChildgramUsageHourly">Активность по часам</string>
+    <string name="ChildgramUsageSelect">Нажмите на чат или экран, чтобы отфильтровать график</string>
+    <string name="ChildgramUpdateAvailable">Доступно обновление Childgram</string>
+    <string name="ChildgramUpdateVersion">Версия %1$s</string>
+    <string name="ChildgramCheckUpdate">Проверить обновления</string>
+    <string name="ChildgramUpdateCheckFailed">Не удалось проверить обновления. Попробуйте позже.</string>
+    <string name="ChildgramUpdateDownloadFailed">Не удалось скачать или проверить обновление. Попробуйте ещё раз.</string>
 </resources>

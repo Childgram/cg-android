@@ -11235,4 +11235,34 @@
     <string name="RoundVideoComposition">Composition</string>
     <string name="RoundVideoCompositionEnabled">Round video styling</string>
     <string name="RoundVideoCompositionInfo">Disable styling to record a plain square without outside-circle blur, dimming or Telegram overlays.</string>
+
+    <!-- Childgram -->
+    <string name="ChildgramAccessDenied">Access is restricted. Ask your parents if you need access to this chat.</string>
+    <string name="ChildgramAccessCheckFailed">Could not verify access. Connect to the internet and try again.</string>
+    <string name="ChildgramPrivacyCheckFailed">Could not verify invitation privacy. We will try again when connected.</string>
+    <string name="ChildgramPrivacyExceptionsChanged">Telegram changed invitation exceptions. Ask your parents to review them.</string>
+    <string name="ChildgramUsageTitle">Time in chats</string>
+    <string name="ChildgramUsageSubtitle">See where your time goes</string>
+    <string name="ChildgramUsageTotal">Total</string>
+    <string name="ChildgramUsageVideo">Including full-screen video</string>
+    <string name="ChildgramUsageEmpty">No activity on this day</string>
+    <string name="ChildgramUsagePrevious">Previous day</string>
+    <string name="ChildgramUsageNext">Next day</string>
+    <string name="ChildgramUsageChats">Chats and screens</string>
+    <string name="ChildgramUsageDialogs">Chat list</string>
+    <string name="ChildgramUsageSettings">Settings</string>
+    <string name="ChildgramUsageContacts">Contacts</string>
+    <string name="ChildgramUsageCalls">Calls</string>
+    <string name="ChildgramUsageProfile">Profiles</string>
+    <string name="ChildgramUsageOther">Other screens</string>
+    <string name="ChildgramUsageClear">Clear older history</string>
+    <string name="ChildgramUsageClearInfo">Keep today and the previous 7 full days. This only clears local usage history.</string>
+    <string name="ChildgramUsageError">Could not load usage history</string>
+    <string name="ChildgramUsageHourly">Hourly activity</string>
+    <string name="ChildgramUsageSelect">Tap a chat or screen to filter the chart</string>
+    <string name="ChildgramUpdateAvailable">Childgram update available</string>
+    <string name="ChildgramUpdateVersion">Version %1$s</string>
+    <string name="ChildgramCheckUpdate">Check for updates</string>
+    <string name="ChildgramUpdateCheckFailed">Could not check for updates. Please try again later.</string>
+    <string name="ChildgramUpdateDownloadFailed">Could not download or verify the update. Please try again.</string>
 </resources>

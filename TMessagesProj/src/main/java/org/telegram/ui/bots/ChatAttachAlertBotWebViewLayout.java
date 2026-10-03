@@ -1,5 +1,7 @@
 package org.telegram.ui.bots;
 
+import org.telegram.messenger.ChildgramAccess;
+import org.telegram.messenger.BuildVars;
 import static org.telegram.messenger.AndroidUtilities.dp;
 import static org.telegram.ui.Components.Bulletin.DURATION_PROLONG;
 
@@ -490,6 +492,11 @@ public class ChatAttachAlertBotWebViewLayout extends ChatAttachAlert.AttachAlert
     }
 
     public void requestWebView(int currentAccount, long peerId, long botId, boolean silent, int replyToMsgId, String startCommand, long monoforumTopicId) {
+        if (BuildVars.CHILDGRAM && !ChildgramAccess.getInstance(currentAccount).isAllowed(botId)) {
+            ChildgramAccess.getInstance(currentAccount).check(botId, org.telegram.ui.LaunchActivity.getSafeLastFragment(),
+                    () -> requestWebView(currentAccount, peerId, botId, silent, replyToMsgId, startCommand, monoforumTopicId));
+            return;
+        }
         this.currentAccount = currentAccount;
         this.peerId = peerId;
         this.botId = botId;

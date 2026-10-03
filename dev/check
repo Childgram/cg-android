@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+# Build first with ./dev/build. All Java/Android tools stay in the existing image.
+docker run --rm --init --platform linux/amd64 \
+    -v "$PWD:/workspace" -w /workspace childgram-android:36-ndk27 bash -euc '
+    umask 077
+    out=.local/checks/childgram
+    classes=TMessagesProj/build/intermediates/runtime_library_classes_jar/debug/bundleLibRuntimeToJarDebug/classes.jar
+    android="$ANDROID_HOME/platforms/android-36/android.jar"
+    buildtools="$ANDROID_HOME/build-tools/36.0.0"
+    mkdir -p "$out/classes" "$out/dex"
+    javac -cp "$classes:$android" -d "$out/classes" dev/tests/*.java
+    java -cp "$out/classes:$classes:$android" ChildgramUsageTimeTest
+    java -cp "$out/classes:$classes:$android" org.telegram.messenger.ChildgramPrivacyRulesTest
+    if [[ -f dev/tests/ChildgramAccessInstrumentation.java ]]; then
+        cat > "$out/AndroidManifest.xml" <<EOF
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.childgram.tests">
+    <application android:label="Childgram checks" android:debuggable="true" />
+    <instrumentation android:name="org.telegram.messenger.ChildgramAccessInstrumentation" android:targetPackage="org.childgram.messenger.beta" />
+</manifest>
+EOF
+        jar cf "$out/tests.jar" -C "$out/classes" .
+        "$buildtools/d8" --min-api 26 --lib "$android" --classpath "$classes" --output "$out/dex" "$out/tests.jar"
+        "$buildtools/aapt2" link -I "$android" --manifest "$out/AndroidManifest.xml" --min-sdk-version 26 --target-sdk-version 34 -o "$out/tests-unaligned.apk"
+        jar uf "$out/tests-unaligned.apk" -C "$out/dex" classes.dex
+        "$buildtools/zipalign" -f 4 "$out/tests-unaligned.apk" "$out/tests.apk"
+        "$buildtools/apksigner" sign --ks .local/debug.keystore --ks-pass pass:android "$out/tests.apk"
+    fi
+'
+
+if [[ "${1:-}" == --device || "${1:-}" == --usage-device ]]; then
+    ./dev/emulator adb install -r .local/checks/childgram/tests.apk
+    args=(-e verify_usage true)
+    if [[ "${1:-}" == --device ]]; then args+=(-e verify_privacy true); else args+=(-e usage_only true); fi
+    result=$(./dev/emulator adb shell am instrument -w "${args[@]}" org.childgram.tests/org.telegram.messenger.ChildgramAccessInstrumentation)
+    printf '%s\n' "$result"
+    [[ "$result" == *'INSTRUMENTATION_CODE: -1'* ]] && [[ "$result" == *'status=passed'* ]]
+fi

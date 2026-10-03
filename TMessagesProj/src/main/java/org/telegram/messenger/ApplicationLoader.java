@@ -340,6 +340,19 @@ public class ApplicationLoader extends Application {
                 }
             }
         };
+        if (BuildVars.CHILDGRAM) {
+            ForegroundDetector.getInstance().addListener(new ForegroundDetector.Listener() {
+                @Override
+                public void onBecameForeground() {
+                    ChildgramPrivacyController.onForeground();
+                }
+
+                @Override
+                public void onBecameBackground() {
+                    ChildgramPrivacyController.onBackground();
+                }
+            });
+        }
         if (BuildConfig.DEBUG_VERSION) {
             new ANRDetector(FileLog::dumpANR);
         }
@@ -702,6 +715,8 @@ public class ApplicationLoader extends Application {
     public BaseFragment openSettings(int n) {
         return null;
     }
+
+    public boolean updateCheckFailed() { return false; }
 
     public boolean isCustomUpdate() {
         return false;

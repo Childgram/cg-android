@@ -133,6 +133,7 @@ import androidx.viewpager.widget.ViewPager;
 import com.google.zxing.common.detector.MathUtils;
 
 import org.telegram.PhoneFormat.PhoneFormat;
+import org.telegram.messenger.ChildgramAccess;
 import org.telegram.messenger.AccountInstance;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
@@ -2665,6 +2666,10 @@ public class ChatActivity extends BaseFragment implements
 
     @Override
     public boolean onFragmentCreate() {
+        if (BuildVars.CHILDGRAM && !ChildgramAccess.getInstance(currentAccount).isFragmentAllowed(this)) {
+            ChildgramAccess.deny(this);
+            return false;
+        }
         final long chatId = arguments.getLong("chat_id", 0);
         final long userId = arguments.getLong("user_id", 0);
         final int encId = arguments.getInt("enc_id", 0);
@@ -27483,6 +27488,11 @@ public class ChatActivity extends BaseFragment implements
                 TLRPC.TL_contacts_resolvedPeer resolvedPeer = (TLRPC.TL_contacts_resolvedPeer) response;
                 if (!resolvedPeer.users.isEmpty()) {
                     TLRPC.User user = resolvedPeer.users.get(0);
+                    getMessagesController().putUsers(resolvedPeer.users, false);
+                    if (BuildVars.CHILDGRAM && !ChildgramAccess.getInstance(currentAccount).isAllowed(user.id)) {
+                        ChildgramAccess.getInstance(currentAccount).check(user.id, this, () -> openAttachBotLayout(botUsername));
+                        return;
+                    }
                     if (user.bot && user.bot_attach_menu) {
                         TLRPC.TL_messages_getAttachMenuBot getAttachMenuBot = new TLRPC.TL_messages_getAttachMenuBot();
                         getAttachMenuBot.bot = MessagesController.getInstance(currentAccount).getInputUser(user.id);
@@ -27578,6 +27588,10 @@ public class ChatActivity extends BaseFragment implements
     }
 
     public void openAttachBotLayout(long botId, String startCommand, boolean justAdded) {
+        if (BuildVars.CHILDGRAM && !ChildgramAccess.getInstance(currentAccount).isAllowed(botId)) {
+            ChildgramAccess.getInstance(currentAccount).check(botId, this, () -> openAttachBotLayout(botId, startCommand, justAdded));
+            return;
+        }
         openAttachMenu();
         if (chatAttachAlert != null) {
             chatAttachAlert.showBotLayout(botId, startCommand, justAdded, false);
@@ -34758,7 +34772,14 @@ public class ChatActivity extends BaseFragment implements
         updateBottomOverlay();
     }
 
+    private ChildgramAccess.CommentAccess childgramCommentAccess;
+
+    public ChildgramAccess.CommentAccess getChildgramCommentAccess() {
+        return childgramCommentAccess;
+    }
+
     public void setThreadMessages(ArrayList<MessageObject> messageObjects, TLRPC.Chat originalChat, int originalMessage, int maxInboxReadId, int maxOutboxReadId, TLRPC.TL_forumTopic forumTopic) {
+        childgramCommentAccess = forumTopic == null ? ChildgramAccess.getInstance(currentAccount).commentAccess(originalChat, originalMessage, messageObjects) : null;
         this.forumTopic = forumTopic;
         threadMessageObjects = messageObjects;
         replyingMessageObject = threadMessageObject = threadMessageObjects.get(threadMessageObjects.size() - 1);
@@ -35824,6 +35845,10 @@ public class ChatActivity extends BaseFragment implements
     }
 
     private void openDiscussionMessageChat(long chatId, MessageObject originalMessage, int messageId, long linkedChatId, int maxReadId, int highlightMsgId, MessageObject fallbackMessage) {
+        if (BuildVars.CHILDGRAM && !ChildgramAccess.getInstance(currentAccount).isAllowed(-chatId)) {
+            ChildgramAccess.getInstance(currentAccount).check(-chatId, this, () -> openDiscussionMessageChat(chatId, originalMessage, messageId, linkedChatId, maxReadId, highlightMsgId, fallbackMessage));
+            return;
+        }
         TLRPC.Chat chat = getMessagesController().getChat(chatId);
         TLRPC.TL_messages_getDiscussionMessage req = new TLRPC.TL_messages_getDiscussionMessage();
         req.peer = MessagesController.getInputPeer(chat);
@@ -35967,6 +35992,17 @@ public class ChatActivity extends BaseFragment implements
     }
 
     public void showRequestUrlAlert(final TLRPC.TL_urlAuthResultRequest request, TLRPC.TL_messages_requestUrlAuth buttonReq, String url, boolean ask) {
+        if (BuildVars.CHILDGRAM) {
+            if (request.bot == null) {
+                ChildgramAccess.deny(this);
+                return;
+            }
+            getMessagesController().putUser(request.bot, false);
+            if (!ChildgramAccess.getInstance(currentAccount).isAllowed(request.bot.id)) {
+                ChildgramAccess.getInstance(currentAccount).check(request.bot.id, this, () -> showRequestUrlAlert(request, buttonReq, url, ask));
+                return;
+            }
+        }
         if (getParentActivity() == null) {
             return;
         }

@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+if [[ "${1:-}" != --create || $# != 1 ]]; then
+    echo 'Usage: ./dev/signing-key --create'
+    echo 'Creates the first release key in .local/signing/. Never replace a published key.'
+    exit 1
+fi
+if [[ -e .local/signing ]]; then
+    echo '.local/signing already exists. Preserve it; restore a backup if the key is incomplete.' >&2
+    exit 1
+fi
+if [[ -s dev/release-certificate.sha256 ]]; then
+    echo 'This project already has a release certificate. Restore .local/signing from backup; do not generate a replacement.' >&2
+    exit 1
+fi
+docker image inspect childgram-android:36-ndk27 >/dev/null
+umask 077
+mkdir -p .local
+chmod 700 .local
+mkdir .local/signing
+docker run --rm --network none --platform linux/amd64 \
+    -v "$PWD/.local/signing:/signing" -w /signing \
+    childgram-android:36-ndk27 bash -euc '
+        umask 077
+        od -An -N32 -tx1 /dev/urandom | tr -d " \n" > password.txt
+        printf "\n" >> password.txt
+        keytool -genkeypair -noprompt -storetype PKCS12 \
+            -keystore childgram-release.p12 -storepass:file password.txt -keypass:file password.txt \
+            -alias childgram -keyalg RSA -keysize 4096 -sigalg SHA256withRSA -validity 10000 \
+            -dname "CN=Childgram,O=childgram.org"
+        keytool -exportcert -rfc -keystore childgram-release.p12 \
+            -storepass:file password.txt -alias childgram -file certificate.pem
+        keytool -exportcert -keystore childgram-release.p12 \
+            -storepass:file password.txt -alias childgram | sha256sum | cut -d " " -f 1 > certificate.sha256
+        printf "Certificate SHA-256: "
+        cat certificate.sha256
+    '
+echo 'Key created. Back up the entire .local/signing/ directory securely before distributing an APK.'
