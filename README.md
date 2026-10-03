@@ -6,14 +6,17 @@ ecosystem. The current implementation limits entry to unfamiliar channels, group
 and bots, preserves ordinary personal chats, and reports time by chat and hour,
 including a separate full-screen video counter.
 
-**Status: local alpha candidate; not publicly released.** Background notification
-delivery, final branding and an update distribution channel are still pending.
+**Status: alpha candidate; APK publication is pending human review.** Source code,
+the [website](https://childgram.org) and the
+[update feed](https://update.childgram.org/android.json) are published.
+Background notification delivery and final onboarding branding still need verification.
 Usage statistics stay on the device; clearing app data removes that local history.
 
 - Release application ID: `org.childgram` (ARM64 APK).
 - Development application ID: `org.childgram.messenger.beta`.
 - Build, signing, behavior and verification: [Childgram development guide](dev/README.md).
 - Public release certificate: [SHA-256 fingerprint](dev/release-certificate.sha256).
+- Release workflow and shared documentation: [publishing guide](https://github.com/Childgram/childgram.org/blob/main/doc/updates.md).
 - Upstream base: [Telegram 12.10.6, build 7112](https://github.com/DrKLO/Telegram/tree/f2908b14133bbffbf7ab04f641ecb5bfaf533242).
 - Upstream [license](LICENSE) and attribution are retained.
 

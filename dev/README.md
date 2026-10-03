@@ -170,7 +170,8 @@ Pages включается отдельно в настройках репози
 custom domain **update.childgram.org**, **Enforce HTTPS** после выдачи сертификата.
 В environment `github-pages` разрешите основную ветку и теги `v*`, поскольку
 событие публикации релиза связано с тегом. Подробный план DNS и отдельного сайта
-в общей рабочей директории: `../doc/updates.md` относительно корня Android.
+в [общей документации](https://github.com/Childgram/childgram.org/blob/main/doc/updates.md)
+(локально `../doc/updates.md` относительно корня Android).
 
 ## Где находятся инструменты
 
