@@ -192,6 +192,9 @@ android {
                 arguments '-DANDROID_STL=c++_static', '-DANDROID_PLATFORM=android-21' //, '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON'
                 if (childgram) {
                     arguments '-DCMAKE_JOB_POOLS=childgram_compile=4;childgram_link=1', '-DCMAKE_JOB_POOL_COMPILE=childgram_compile', '-DCMAKE_JOB_POOL_LINK=childgram_link'
+                    if (project.hasProperty('childgramCompilerCache')) {
+                        arguments '-DCMAKE_C_COMPILER_LAUNCHER=ccache', '-DCMAKE_CXX_COMPILER_LAUNCHER=ccache'
+                    }
                 }
                 targets 'tmessages.49'
             }

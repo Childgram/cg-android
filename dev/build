@@ -54,13 +54,19 @@ if git submodule status --recursive | LC_ALL=C grep '^[+-U]' >/dev/null; then
 fi
 
 mkdir -p .local/logs
+gradle_cache=childgram-gradle
+if [[ "${GITHUB_ACTIONS:-}" == true ]]; then
+    mkdir -p .local/gradle-cache
+    gradle_cache="$PWD/.local/gradle-cache"
+fi
 chmod 700 .local
 log=".local/logs/build-$(date +%Y%m%d-%H%M%S).log"
 docker run --rm --init --platform linux/amd64 \
     --cpus "$cpus" --memory 14g \
     -e GRADLE_USER_HOME=/gradle-cache \
     -e ANDROID_USER_HOME=/workspace/.local/build-android \
-    -v childgram-gradle:/gradle-cache \
+    -e CCACHE_DIR=/workspace/.local/ccache -e CCACHE_MAXSIZE=2G \
+    -v "$gradle_cache:/gradle-cache" \
     -v "$PWD:/workspace" \
     -v "$PWD/.git:/workspace/.git:ro" \
     -w /workspace "$image" bash -euc '
@@ -71,7 +77,12 @@ docker run --rm --init --platform linux/amd64 \
                 -dname "CN=Childgram Development,O=Childgram,C=ME" \
                 -keyalg RSA -keysize 2048 -validity 10000
         fi
-        exec gradle --no-daemon --no-watch-fs --no-parallel --max-workers=4 --console=plain \
+        if command -v ccache >/dev/null; then
+            set -- -PchildgramCompilerCache "$@"
+            ccache --zero-stats
+            trap "ccache --show-stats" EXIT
+        fi
+        gradle --no-daemon --no-watch-fs --no-parallel --max-workers=4 --console=plain \
             -Dorg.gradle.jvmargs="-Xmx6g -XX:MaxMetaspaceSize=1g" \
             --project-cache-dir /workspace/.local/gradle-project "$@"
     ' childgram-build "${args[@]}" "$@" 2>&1 | tee "$log"

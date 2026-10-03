@@ -36,6 +36,10 @@ RUN sdkmanager \
 # The pinned Media3 submodule still compiles against API 35.
 RUN sdkmanager --sdk_root="${ANDROID_HOME}" "platforms;android-35" "build-tools;35.0.0"
 
+# Childgram reuses native compiler results across disposable release runners.
+RUN apt-get update && apt-get install -y --no-install-recommends ccache && \
+    rm -rf /var/lib/apt/lists/*
+
 CMD mkdir -p /home/source/TMessagesProj/build/outputs/apk && \
     mkdir -p /home/gradle/TMessagesProj/build/outputs/bundle && \
     mkdir -p /home/source/TMessagesProj/build/outputs/native-debug-symbols && \
