@@ -27,5 +27,6 @@
 - Keep pinned submodule revisions. Use `git submodule update --init --recursive
   --depth=1` after intentional upstream updates, not `--remote`.
 - The official remote is `upstream` (`DrKLO/Telegram`). The publishing remote is
-  `origin` (`Childgram/cg-android`), a GitHub fork of upstream. No Childgram release
-  has been published. Leave commits and pushes for the user's explicit request.
+  `origin` (`Childgram/cg-android`), a GitHub fork of upstream. The first public
+  prerelease is `v0.1.0-alpha.1` (version code 1). Leave commits and pushes for
+  the user's explicit request.
