@@ -52,6 +52,8 @@ jobs:
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
       - name: Prepare an image context without project files or secrets
         run: |
+          # Gradle dependency caches are portable; process locks are not.
+          rm -f .local/gradle-cache/caches/modules-2/*.lock .local/gradle-cache/caches/modules-2/gc.properties
           mkdir -p .local/docker-context
           cp Dockerfile .local/docker-context/Dockerfile
       - name: Restore or build the Android toolchain image
@@ -92,6 +94,7 @@ jobs:
         run: |
           ./dev/build --release
           sudo chown -R "$(id -u):$(id -g)" .local TMessagesProj_App/build
+          rm -f .local/gradle-cache/caches/modules-2/*.lock .local/gradle-cache/caches/modules-2/gc.properties
       - name: Package release assets
         if: ${{ !inputs.verify_only }}
         run: python3 dev/release.py package --output .local/release-assets
