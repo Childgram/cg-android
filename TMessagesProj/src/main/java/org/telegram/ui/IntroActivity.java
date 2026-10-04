@@ -94,6 +94,7 @@ import javax.microedition.khronos.opengles.GL10;
 
 public class IntroActivity extends BaseFragment implements NotificationCenter.NotificationCenterDelegate {
     private final static int ICON_WIDTH_DP = 200, ICON_HEIGHT_DP = 150;
+    private final static int TELEGRAM_PAGE_OFFSET = BuildVars.CHILDGRAM ? 1 : 0;
 
     private final Object pagerHeaderTag = new Object(),
             pagerMessageTag = new Object();
@@ -142,7 +143,7 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
                 LocaleController.getString(R.string.Page6Title)
         };
         messages = new String[]{
-                LocaleController.getString(BuildVars.CHILDGRAM ? R.string.ChildgramIntroMessage : R.string.Page1Message),
+                LocaleController.getString(R.string.Page1Message),
                 LocaleController.getString(R.string.Page2Message),
                 LocaleController.getString(R.string.Page3Message),
                 LocaleController.getString(R.string.Page5Message),
@@ -154,15 +155,11 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
 
     @Override
     public View createView(Context context) {
-        if (BuildVars.CHILDGRAM) {
-            titles[0] = LocaleController.getString(R.string.ChildgramAppName);
-        } else {
-            logoDrawable = context.getResources().getDrawable(R.drawable.telegram_logo).mutate();
-            logoDrawable.setBounds(0, dp(8.666f), dp(115), dp(35));
-            SpannableStringBuilder ssb = new SpannableStringBuilder(LocaleController.getString(R.string.Page1Title));
-            ssb.setSpan(new ImageSpan(logoDrawable), 0, ssb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            titles[0] = ssb;
-        }
+        logoDrawable = context.getResources().getDrawable(R.drawable.telegram_logo).mutate();
+        logoDrawable.setBounds(0, dp(8.666f), dp(115), dp(35));
+        SpannableStringBuilder ssb = new SpannableStringBuilder(LocaleController.getString(R.string.Page1Title));
+        ssb.setSpan(new ImageSpan(logoDrawable), 0, ssb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        titles[0] = ssb;
 
 
         actionBar.setAddToContainer(false);
@@ -263,7 +260,7 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
                     eglThread.setSurfaceTextureSize(width, height);
                     eglThread.postRunnable(()->{
                         float time = (System.currentTimeMillis() - currentDate) / 1000.0f;
-                        Intro.setPage(currentViewPagerPage);
+                        Intro.setPage(Math.max(0, currentViewPagerPage - TELEGRAM_PAGE_OFFSET));
                         Intro.setDate(time);
                         Intro.onDrawFrame(0);
                         if (eglThread != null && eglThread.isAlive() && eglThread.eglDisplay != null && eglThread.eglSurface != null) {
@@ -316,7 +313,7 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
                     return;
                 }
                 float offset = (position * width + positionOffsetPixels - currentViewPagerPage * width) / width;
-                Intro.setScrollOffset(offset);
+                Intro.setScrollOffset(BuildVars.CHILDGRAM && position == 0 ? 0 : offset);
             }
 
             @Override
@@ -397,8 +394,9 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
             destroyed = true;
         });
 
-        bottomPages = new BottomPagesView(context, viewPager, 6);
-        frameContainerView.addView(bottomPages, LayoutHelper.createFrame(66, 5, Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, ICON_HEIGHT_DP + 200, 0, 0));
+        int pagesCount = viewPager.getAdapter().getCount();
+        bottomPages = new BottomPagesView(context, viewPager, pagesCount);
+        frameContainerView.addView(bottomPages, LayoutHelper.createFrame(pagesCount * 11, 5, Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, ICON_HEIGHT_DP + 200, 0, 0));
 
         switchLanguageTextView = new TextView(context);
         switchLanguageTextView.setGravity(Gravity.CENTER);
@@ -452,7 +450,7 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
     public void onResume() {
         super.onResume();
         if (justCreated) {
-            if (LocaleController.isRTL) {
+            if (LocaleController.isRTL && !BuildVars.CHILDGRAM) {
                 viewPager.setCurrentItem(6);
                 lastPage = 6;
             } else {
@@ -568,7 +566,7 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
     private class IntroAdapter extends PagerAdapter {
         @Override
         public int getCount() {
-            return titles.length;
+            return titles.length + TELEGRAM_PAGE_OFFSET;
         }
 
         @NonNull
@@ -625,8 +623,9 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
 
             container.addView(frameLayout, 0);
 
-            headerTextView.setText(titles[position]);
-            messageTextView.setText(AndroidUtilities.replaceTags(messages[position]));
+            int telegramPage = position - TELEGRAM_PAGE_OFFSET;
+            headerTextView.setText(childgramLogo != null ? LocaleController.getString(R.string.ChildgramAppName) : titles[telegramPage]);
+            messageTextView.setText(AndroidUtilities.replaceTags(childgramLogo != null ? LocaleController.getString(R.string.ChildgramIntroMessage) : messages[telegramPage]));
 
             return frameLayout;
         }
@@ -880,7 +879,7 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
                 }
                 int deltaDrawMs = (int) Math.min(current - lastDrawFrame, 16);
                 float time = (current - currentDate) / 1000.0f;
-                Intro.setPage(currentViewPagerPage);
+                Intro.setPage(Math.max(0, currentViewPagerPage - TELEGRAM_PAGE_OFFSET));
                 Intro.setDate(time);
                 Intro.onDrawFrame(deltaDrawMs);
                 egl10.eglSwapBuffers(eglDisplay, eglSurface);
