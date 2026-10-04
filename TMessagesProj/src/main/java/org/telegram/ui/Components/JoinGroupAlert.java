@@ -205,7 +205,7 @@ public class JoinGroupAlert extends BottomSheet {
             requestTextView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
             requestTextView.setTypeface(AndroidUtilities.bold());
             requestTextView.setOnClickListener((view) -> {
-                if (BuildVars.CHILDGRAM) {
+                if (chatInvite != null ? !ChildgramAccess.getInstance(currentAccount).isInviteAllowed(chatInvite) : ChildgramAccess.blocksChat(currentChat)) {
                     ChildgramAccess.deny(fragment);
                     dismiss();
                     return;
@@ -343,7 +343,7 @@ public class JoinGroupAlert extends BottomSheet {
             joinTextView.setTypeface(AndroidUtilities.bold());
             linearLayout.addView(joinTextView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48, Gravity.START, 14, 0, 14, 14));
             joinTextView.setOnClickListener(v -> {
-                if (BuildVars.CHILDGRAM) {
+                if (chatInvite != null ? !ChildgramAccess.getInstance(currentAccount).isInviteAllowed(chatInvite) : ChildgramAccess.blocksChat(currentChat)) {
                     ChildgramAccess.deny(fragment);
                     dismiss();
                     return;

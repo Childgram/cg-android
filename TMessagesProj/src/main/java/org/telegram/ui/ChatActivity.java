@@ -133,6 +133,7 @@ import androidx.viewpager.widget.ViewPager;
 import com.google.zxing.common.detector.MathUtils;
 
 import org.telegram.PhoneFormat.PhoneFormat;
+import org.telegram.messenger.ChildgramParentalSettings;
 import org.telegram.messenger.ChildgramAccess;
 import org.telegram.messenger.AccountInstance;
 import org.telegram.messenger.AndroidUtilities;
@@ -35992,7 +35993,7 @@ public class ChatActivity extends BaseFragment implements
     }
 
     public void showRequestUrlAlert(final TLRPC.TL_urlAuthResultRequest request, TLRPC.TL_messages_requestUrlAuth buttonReq, String url, boolean ask) {
-        if (BuildVars.CHILDGRAM) {
+        if (ChildgramParentalSettings.blockBots()) {
             if (request.bot == null) {
                 ChildgramAccess.deny(this);
                 return;

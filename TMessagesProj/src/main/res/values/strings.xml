@@ -11267,4 +11267,31 @@
     <string name="ChildgramCheckUpdate">Check for updates</string>
     <string name="ChildgramUpdateCheckFailed">Could not check for updates. Please try again later.</string>
     <string name="ChildgramUpdateDownloadFailed">Could not download or verify the update. Please try again.</string>
+
+    <!-- Childgram parental control -->
+    <string name="ChildgramParentalTitle">Parental control</string>
+    <string name="ChildgramParentalSubtitle">Restrictions and access PIN</string>
+    <string name="ChildgramParentalBlock">Block</string>
+    <string name="ChildgramParentalChannels">Unknown channels</string>
+    <string name="ChildgramParentalGroups">Unknown groups</string>
+    <string name="ChildgramParentalBots">Starting unknown bots</string>
+    <string name="ChildgramParentalInvites">Invitations from others</string>
+    <string name="ChildgramParentalRestrictionsInfo">Block access to channels and groups the account has not joined, and starting bots that do not already have permission to message it. These switches apply to all accounts in this app.</string>
+    <string name="ChildgramParentalInvitesInfo">While enabled, Childgram checks invitation privacy on every launch and return to the app and sets it to Nobody. Existing exceptions are kept. Turning this off leaves Telegram privacy unchanged and lets you edit it yourself in Privacy and Security.</string>
+    <string name="ChildgramPrivacyInvitesLocked">Editing invitations is disabled by Childgram parental controls.</string>
+    <string name="ChildgramParentalPinHeader">Access to this section</string>
+    <string name="ChildgramParentalSetPin">Set PIN</string>
+    <string name="ChildgramParentalChangePin">Change PIN</string>
+    <string name="ChildgramParentalRemovePin">Remove PIN</string>
+    <string name="ChildgramParentalPinInfo">The PIN is required each time you enter this section, including after returning from the background. It is separate from the Telegram app passcode.</string>
+    <string name="ChildgramParentalNoPin">Without a PIN, anyone using this app can disable the restrictions. Set a PIN before giving the device to your child.</string>
+    <string name="ChildgramParentalWelcome">All four restrictions are already on. Protect these settings with a PIN now so your child cannot turn them off.</string>
+    <string name="ChildgramParentalLater">Later</string>
+    <string name="ChildgramParentalWithoutPin">Continue without PIN</string>
+    <string name="ChildgramParentalPinEnter">Enter parental control PIN</string>
+    <string name="ChildgramParentalPinCreate">Create parental control PIN</string>
+    <string name="ChildgramParentalPinRepeat">Repeat PIN</string>
+    <string name="ChildgramParentalPinHint">Enter 4 digits</string>
+    <string name="ChildgramParentalPinMismatch">PINs do not match. Try again.</string>
+    <string name="ChildgramParentalPinWrong">Incorrect PIN</string>
 </resources>

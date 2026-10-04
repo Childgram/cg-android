@@ -37,6 +37,7 @@ import androidx.annotation.Keep;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import org.telegram.messenger.ChildgramParentalSettings;
 import org.telegram.messenger.AccountInstance;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.BuildVars;
@@ -68,6 +69,8 @@ import org.telegram.ui.Components.AlertsCreator;
 import org.telegram.ui.Components.AnimatedEmojiDrawable;
 import org.telegram.ui.Components.Bulletin;
 import org.telegram.ui.Components.BulletinFactory;
+import org.telegram.ui.Components.ColoredImageSpan;
+import org.telegram.ui.Components.IconBackgroundColors;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.Premium.PremiumGradient;
 import org.telegram.ui.Components.RecyclerListView;
@@ -414,7 +417,9 @@ public class PrivacySettingsActivity extends BaseFragment implements Notificatio
             } else if (position == phoneNumberRow) {
                 presentFragment(new PrivacyControlActivity(ContactsController.PRIVACY_RULES_TYPE_PHONE));
             } else if (position == groupsRow) {
-                presentFragment(new PrivacyControlActivity(ContactsController.PRIVACY_RULES_TYPE_INVITE));
+                if (!ChildgramParentalSettings.blockInvites()) {
+                    presentFragment(new PrivacyControlActivity(ContactsController.PRIVACY_RULES_TYPE_INVITE));
+                }
             } else if (position == callsRow) {
                 presentFragment(new PrivacyControlActivity(ContactsController.PRIVACY_RULES_TYPE_CALLS));
             } else if (position == profilePhotoRow) {
@@ -750,7 +755,7 @@ public class PrivacySettingsActivity extends BaseFragment implements Notificatio
         giftsRow = rowCount++;
         bioRow = rowCount++;
         musicRow = rowCount++;
-        groupsRow = BuildVars.CHILDGRAM ? -1 : rowCount++;
+        groupsRow = rowCount++;
         privacyShadowRow = rowCount++;
 
         if (getMessagesController().autoarchiveAvailable || getUserConfig().isPremium()) {
@@ -1004,6 +1009,7 @@ public class PrivacySettingsActivity extends BaseFragment implements Notificatio
     @Override
     public void onResume() {
         super.onResume();
+        updateRows(false);
         if (listAdapter != null) {
             listAdapter.notifyDataSetChanged();
         }
@@ -1021,7 +1027,7 @@ public class PrivacySettingsActivity extends BaseFragment implements Notificatio
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int position = holder.getAdapterPosition();
             return position == passcodeRow || position == passwordRow || position == passkeysRow || position == blockedRow || position == sessionsRow || position == secretWebpageRow || position == webSessionsRow ||
-                    position == groupsRow && !getContactsController().getLoadingPrivacyInfo(ContactsController.PRIVACY_RULES_TYPE_INVITE) ||
+                    position == groupsRow && !ChildgramParentalSettings.blockInvites() && !getContactsController().getLoadingPrivacyInfo(ContactsController.PRIVACY_RULES_TYPE_INVITE) ||
                     position == lastSeenRow && !getContactsController().getLoadingPrivacyInfo(ContactsController.PRIVACY_RULES_TYPE_LASTSEEN) ||
                     position == callsRow && !getContactsController().getLoadingPrivacyInfo(ContactsController.PRIVACY_RULES_TYPE_CALLS) ||
                     position == profilePhotoRow && !getContactsController().getLoadingPrivacyInfo(ContactsController.PRIVACY_RULES_TYPE_PHOTO) ||
@@ -1228,6 +1234,8 @@ public class PrivacySettingsActivity extends BaseFragment implements Notificatio
                     } else if (position == contactsDeleteRow) {
                         textCell.setText(getString("SyncContactsDelete", R.string.SyncContactsDelete), true);
                     }
+                    textCell.setAlpha(position == groupsRow && ChildgramParentalSettings.blockInvites() ? 0.5f : 1f);
+                    textCell.setEnabled(isEnabled(holder));
                     textCell.setDrawLoading(showLoading, loadingLen, animated);
                     break;
                 case 1:
@@ -1244,7 +1252,17 @@ public class PrivacySettingsActivity extends BaseFragment implements Notificatio
                     } else if (position == botsDetailRow) {
                         privacyCell.setText(getString("PrivacyBotsInfo", R.string.PrivacyBotsInfo));
                     } else if (position == privacyShadowRow) {
-                        privacyCell.setText(getString(R.string.PrivacyInvitesInfo));
+                        if (ChildgramParentalSettings.blockInvites()) {
+                            SpannableStringBuilder text = new SpannableStringBuilder("\uFFFC ")
+                                    .append(getString(R.string.ChildgramPrivacyInvitesLocked));
+                            ColoredImageSpan icon = new ColoredImageSpan(R.drawable.childgram_parental);
+                            icon.setSize(dp(16));
+                            icon.setOverrideColor(IconBackgroundColors.GREEN.bottom);
+                            text.setSpan(icon, 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                            privacyCell.setText(text);
+                        } else {
+                            privacyCell.setText(getString(R.string.PrivacyInvitesInfo));
+                        }
                     } else if (position == contactsDetailRow) {
                         /*if (newSync) {
                             privacyCell.setText(LocaleController.getString(R.string.SyncContactsInfoOn));

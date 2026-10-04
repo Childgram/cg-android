@@ -129,6 +129,7 @@ import androidx.viewpager.widget.PagerAdapter;
 import androidx.viewpager.widget.ViewPager;
 
 import org.telegram.PhoneFormat.PhoneFormat;
+import org.telegram.messenger.ChildgramParentalSettings;
 import org.telegram.messenger.ChildgramAccess;
 import org.telegram.messenger.AccountInstance;
 import org.telegram.messenger.AndroidUtilities;
@@ -14599,7 +14600,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
                     new SearchResult(104, getString(R.string.PrivacyForwards), getString(R.string.PrivacySettings), R.drawable.msg_secret, () -> f.presentFragment(new PrivacyControlActivity(ContactsController.PRIVACY_RULES_TYPE_FORWARDS, true))).withLink("tg://settings/privacy/forwards"),
                     new SearchResult(122, getString(R.string.PrivacyP2P), getString(R.string.PrivacySettings), R.drawable.msg_secret, () -> f.presentFragment(new PrivacyControlActivity(ContactsController.PRIVACY_RULES_TYPE_P2P, true))).withLink("tg://settings/privacy/calls/p2p"),
                     new SearchResult(106, getString(R.string.Calls), getString(R.string.PrivacySettings), R.drawable.msg_secret, () -> f.presentFragment(new PrivacyControlActivity(ContactsController.PRIVACY_RULES_TYPE_CALLS, true))).withLink("tg://settings/privacy/calls"),
-                    BuildVars.CHILDGRAM ? null : new SearchResult(107, getString(R.string.PrivacyInvites), getString(R.string.PrivacySettings), R.drawable.msg_secret, () -> f.presentFragment(new PrivacyControlActivity(ContactsController.PRIVACY_RULES_TYPE_INVITE, true))).withLink("tg://settings/privacy/invites"),
+                    ChildgramParentalSettings.blockInvites() ? null : new SearchResult(107, getString(R.string.PrivacyInvites), getString(R.string.PrivacySettings), R.drawable.msg_secret, () -> f.presentFragment(new PrivacyControlActivity(ContactsController.PRIVACY_RULES_TYPE_INVITE, true))).withLink("tg://settings/privacy/invites"),
                     new SearchResult(123, getString(R.string.PrivacyVoiceMessages), getString(R.string.PrivacySettings), R.drawable.msg_secret, () -> {
                         if (!UserConfig.getInstance(currentAccount).isPremium()) {
                             BulletinFactory.of(f).createRestrictVoiceMessagesPremiumBulletin().show();

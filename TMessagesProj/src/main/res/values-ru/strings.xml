@@ -294,4 +294,31 @@
     <string name="ChildgramCheckUpdate">Проверить обновления</string>
     <string name="ChildgramUpdateCheckFailed">Не удалось проверить обновления. Попробуйте позже.</string>
     <string name="ChildgramUpdateDownloadFailed">Не удалось скачать или проверить обновление. Попробуйте ещё раз.</string>
+
+    <!-- Childgram parental control -->
+    <string name="ChildgramParentalTitle">Родительский контроль</string>
+    <string name="ChildgramParentalSubtitle">Ограничения и PIN-код доступа</string>
+    <string name="ChildgramParentalBlock">Запретить</string>
+    <string name="ChildgramParentalChannels">Незнакомые каналы</string>
+    <string name="ChildgramParentalGroups">Незнакомые группы</string>
+    <string name="ChildgramParentalBots">Запуск незнакомых ботов</string>
+    <string name="ChildgramParentalInvites">Приглашения от других</string>
+    <string name="ChildgramParentalRestrictionsInfo">Запрет перехода в каналы и группы, в которых аккаунт не состоит, и запуска ботов, ещё не получивших разрешение писать ему. Переключатели действуют для всех аккаунтов в этом приложении.</string>
+    <string name="ChildgramParentalInvitesInfo">При включённом запрете Childgram проверяет настройку приглашений при каждом запуске и возвращении в приложение и устанавливает «Никто». Существующие исключения сохраняются. При отключении запрета настройка Telegram не меняется: её можно самостоятельно изменить в разделе «Конфиденциальность».</string>
+    <string name="ChildgramPrivacyInvitesLocked">Изменение приглашений отключено в родительском контроле Childgram.</string>
+    <string name="ChildgramParentalPinHeader">Доступ в этот раздел</string>
+    <string name="ChildgramParentalSetPin">Установить PIN-код</string>
+    <string name="ChildgramParentalChangePin">Изменить PIN-код</string>
+    <string name="ChildgramParentalRemovePin">Удалить PIN-код</string>
+    <string name="ChildgramParentalPinInfo">PIN-код требуется при каждом входе в этот раздел, в том числе после возвращения из фона. Он не связан с кодом блокировки Telegram.</string>
+    <string name="ChildgramParentalNoPin">Без PIN-кода любой пользователь приложения сможет отключить ограничения. Установите PIN-код, прежде чем передавать устройство ребёнку.</string>
+    <string name="ChildgramParentalWelcome">Все четыре ограничения уже включены. Защитите эти настройки PIN-кодом сейчас, чтобы ребёнок не мог их отключить.</string>
+    <string name="ChildgramParentalLater">Позже</string>
+    <string name="ChildgramParentalWithoutPin">Продолжить без PIN-кода</string>
+    <string name="ChildgramParentalPinEnter">Введите PIN родительского контроля</string>
+    <string name="ChildgramParentalPinCreate">Создайте PIN родительского контроля</string>
+    <string name="ChildgramParentalPinRepeat">Повторите PIN</string>
+    <string name="ChildgramParentalPinHint">Введите 4 цифры</string>
+    <string name="ChildgramParentalPinMismatch">PIN-коды не совпадают. Попробуйте ещё раз.</string>
+    <string name="ChildgramParentalPinWrong">Неверный PIN-код</string>
 </resources>

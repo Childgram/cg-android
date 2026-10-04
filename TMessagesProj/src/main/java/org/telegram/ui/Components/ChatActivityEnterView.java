@@ -116,6 +116,7 @@ import androidx.interpolator.view.animation.FastOutSlowInInterpolator;
 import org.telegram.ui.recyclerview.ChatListItemAnimator;
 import androidx.recyclerview.widget.LinearLayoutManager;
 
+import org.telegram.messenger.ChildgramParentalSettings;
 import org.telegram.messenger.ChildgramAccess;
 import org.telegram.messenger.AccountInstance;
 import org.telegram.messenger.AndroidUtilities;
@@ -11511,7 +11512,7 @@ public class ChatActivityEnterView extends FrameLayout implements
         final TL_keyboard.TL_inlineButtonTypeSwitchInline buttonTypeSwitchInline = TLKeyboardHelper.getType(button, TL_keyboard.TL_inlineButtonTypeSwitchInline.class);
         final TL_keyboard.TL_inlineButtonTypeUrl buttonTypeUrl = TLKeyboardHelper.getType(button, TL_keyboard.TL_inlineButtonTypeUrl.class);
 
-        if (BuildVars.CHILDGRAM && buttonTypeCopy == null && buttonTypeUserProfile == null && buttonTypeUrl == null) {
+        if (ChildgramParentalSettings.blockBots() && buttonTypeCopy == null && buttonTypeUserProfile == null && buttonTypeUrl == null) {
             long botId = messageObject.messageOwner.via_bot_id != 0 ? messageObject.messageOwner.via_bot_id : messageObject.getFromChatId();
             if (botId <= 0) {
                 ChildgramAccess.deny(parentFragment);

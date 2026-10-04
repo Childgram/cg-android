@@ -49,9 +49,11 @@ public final class ChildgramAccess extends BaseController {
         botKey(0);
         if (dialogId < 0) {
             TLRPC.Chat chat = getMessagesController().getChat(-dialogId);
-            return chat != null && !chat.min && ChatObject.isInChat(chat);
+            return !blocksChat(chat) || chat != null && !chat.min && ChatObject.isInChat(chat);
         }
-        if (dialogId == 0) return false;
+        if (dialogId == 0) return !ChildgramParentalSettings.blockChannels()
+                && !ChildgramParentalSettings.blockGroups() && !ChildgramParentalSettings.blockBots();
+        if (!ChildgramParentalSettings.blockBots()) return true;
         TLRPC.User user = getMessagesController().getUser(dialogId);
         if (user == null || user.min) return false;
         if (!user.bot) return true;
@@ -62,6 +64,28 @@ public final class ChildgramAccess extends BaseController {
         // Offline access is limited to a permission previously confirmed by the server.
         return getConnectionsManager().getConnectionState() != ConnectionsManager.ConnectionStateConnected
                 && MessagesController.getMainSettings(currentAccount).getBoolean(key, false);
+    }
+
+    /** Unknown chat types stay restricted while either chat restriction is enabled. */
+    public static boolean blocksChat(TLRPC.Chat chat) {
+        if (!BuildVars.CHILDGRAM) return false;
+        if (chat == null || chat instanceof TLRPC.TL_chatEmpty) {
+            return ChildgramParentalSettings.blockChannels() || ChildgramParentalSettings.blockGroups();
+        }
+        return ChatObject.isChannelAndNotMegaGroup(chat)
+                ? ChildgramParentalSettings.blockChannels() : ChildgramParentalSettings.blockGroups();
+    }
+
+    public boolean isInviteAllowed(TLRPC.ChatInvite invite) {
+        if (!BuildVars.CHILDGRAM) return true;
+        if (invite == null) return !blocksChat(null);
+        if (invite.chat != null) {
+            getMessagesController().putChat(invite.chat, false);
+            return isAllowed(-invite.chat.id);
+        }
+        if (!(invite instanceof TLRPC.TL_chatInvite || invite instanceof TLRPC.TL_chatInvite_layer165)) return !blocksChat(null);
+        return !(invite.channel && !invite.megagroup
+                ? ChildgramParentalSettings.blockChannels() : ChildgramParentalSettings.blockGroups());
     }
 
     public void invalidateBot(long id) {
@@ -133,6 +157,8 @@ public final class ChildgramAccess extends BaseController {
                     getMessagesController().putChats(chats.chats, false);
                     getMessagesStorage().putUsersAndChats(null, chats.chats, true, true);
                     if (isAllowed(dialogId)) allowed.run(); else deny(source);
+                } else if (isAllowed(dialogId)) {
+                    allowed.run();
                 } else {
                     failed(source);
                 }
@@ -158,7 +184,7 @@ public final class ChildgramAccess extends BaseController {
                         }
                     }
                 }
-                failed(source);
+                if (isAllowed(dialogId)) allowed.run(); else failed(source);
             }));
             return;
         }
@@ -174,7 +200,9 @@ public final class ChildgramAccess extends BaseController {
             } else if (res instanceof TLRPC.TL_boolFalse) {
                 botChecks.remove(dialogId);
                 MessagesController.getMainSettings(currentAccount).edit().remove(key).apply();
-                deny(source);
+                if (isAllowed(dialogId)) allowed.run(); else deny(source);
+            } else if (isAllowed(dialogId)) {
+                allowed.run();
             } else {
                 failed(source);
             }

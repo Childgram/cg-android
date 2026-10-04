@@ -3653,7 +3653,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
         if (messageObject == null || button == null) {
             return;
         }
-        if (BuildVars.CHILDGRAM) {
+        if (ChildgramParentalSettings.blockBots()) {
             long bot = messageObject.messageOwner.via_bot_id != 0 ? messageObject.messageOwner.via_bot_id : messageObject.getFromChatId();
             if (bot <= 0) {
                 ChildgramAccess.deny(null);
@@ -3679,7 +3679,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
 
     public void sendNotificationCallback(long dialogId, int msgId, byte[] data) {
         AndroidUtilities.runOnUIThread(() -> {
-            if (BuildVars.CHILDGRAM) {
+            if (ChildgramParentalSettings.blockBots()) {
                 if (dialogId <= 0) {
                     ChildgramAccess.deny(null);
                     return;
@@ -3916,7 +3916,7 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
             return;
         }
         final long callbackBot = messageObject.messageOwner.via_bot_id != 0 ? messageObject.messageOwner.via_bot_id : messageObject.getFromChatId();
-        if (BuildVars.CHILDGRAM && callbackBot <= 0) {
+        if (ChildgramParentalSettings.blockBots() && callbackBot <= 0) {
             ChildgramAccess.deny(parentFragment);
             return;
         }

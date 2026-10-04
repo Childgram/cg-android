@@ -13,7 +13,7 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.LongFunction;
 
-/** Enforces invitation privacy on foreground entry without editing exceptions. */
+/** Reconciles invitation privacy with the parental toggle without editing exceptions. */
 public final class ChildgramPrivacyController extends BaseController implements NotificationCenter.NotificationCenterDelegate {
     private static final ChildgramPrivacyController[] instances = new ChildgramPrivacyController[UserConfig.MAX_ACCOUNT_COUNT];
     private static boolean foreground;
@@ -55,7 +55,7 @@ public final class ChildgramPrivacyController extends BaseController implements 
     }
 
     public static void onAccountActivated(int account) {
-        if (!BuildVars.CHILDGRAM || !foreground || !UserConfig.isValidAccount(account)) {
+        if (!ChildgramParentalSettings.blockInvites() || !foreground || !UserConfig.isValidAccount(account)) {
             return;
         }
         if (instances[account] == null) {
@@ -68,23 +68,52 @@ public final class ChildgramPrivacyController extends BaseController implements 
         controller.check();
     }
 
+    /** Called after changing the install-wide invitation toggle. */
+    public static void onSettingsChanged() {
+        if (!BuildVars.CHILDGRAM) return;
+        AndroidUtilities.runOnUIThread(() -> {
+            for (int account = 0; account < instances.length; account++) {
+                if (!ChildgramParentalSettings.blockInvites()) {
+                    if (instances[account] != null) instances[account].cancelCheck();
+                    continue;
+                }
+                if (!UserConfig.getInstance(account).isClientActivated()) continue;
+                if (instances[account] == null) instances[account] = new ChildgramPrivacyController(account);
+                ChildgramPrivacyController controller = instances[account];
+                controller.syncAccount();
+                controller.pending = true;
+                controller.errorShown = false;
+                controller.retryAt = 0;
+                controller.check();
+            }
+        });
+    }
+
+    private void cancelCheck() {
+        generation++;
+        if (requestId != 0) {
+            getConnectionsManager().cancelRequest(requestId, true);
+        }
+        AndroidUtilities.cancelRunOnUIThread(retry);
+        requestId = 0;
+        pending = busy = errorShown = false;
+        retryAt = 0;
+        retryDelay = 30_000;
+    }
+
     private void syncAccount() {
         long id = getUserConfig().isClientActivated() ? getUserConfig().getClientUserId() : 0;
         if (id != userId) {
-            generation++;
-            if (requestId != 0) {
-                getConnectionsManager().cancelRequest(requestId, true);
-            }
-            AndroidUtilities.cancelRunOnUIThread(retry);
+            cancelCheck();
             userId = id;
-            requestId = 0;
-            pending = busy = errorShown = false;
-            retryAt = 0;
-            retryDelay = 30_000;
         }
     }
 
     private void check() {
+        if (!ChildgramParentalSettings.blockInvites()) {
+            cancelCheck();
+            return;
+        }
         syncAccount();
         if (!foreground || !pending || busy || userId == 0) {
             return;
@@ -109,6 +138,10 @@ public final class ChildgramPrivacyController extends BaseController implements 
                 return;
             }
             requestId = 0;
+            if (!ChildgramParentalSettings.blockInvites()) {
+                cancelCheck();
+                return;
+            }
             if (!(response instanceof TL_account.privacyRules)) {
                 failed(false);
                 return;
@@ -143,6 +176,10 @@ public final class ChildgramPrivacyController extends BaseController implements 
                     return;
                 }
                 requestId = 0;
+                if (!ChildgramParentalSettings.blockInvites()) {
+                    cancelCheck();
+                    return;
+                }
                 if (!(result instanceof TL_account.privacyRules)) {
                     failed(false);
                     return;

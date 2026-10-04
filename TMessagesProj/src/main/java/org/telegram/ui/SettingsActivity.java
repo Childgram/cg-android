@@ -689,6 +689,7 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
         items.add(SettingCell.Factory.of(2, IconBackgroundColors.ORANGE.top, IconBackgroundColors.ORANGE.bottom, R.drawable.settings_chat, getString(R.string.SettingsChat), getString(R.string.SettingsChatInfo)));
         items.add(SettingCell.Factory.of(3, IconBackgroundColors.GREEN.top, IconBackgroundColors.GREEN.bottom, R.drawable.settings_privacy, getString(R.string.SettingsPrivacySecurity), getString(R.string.SettingsPrivacySecurityInfo)));
         if (BuildVars.CHILDGRAM) {
+            items.add(SettingCell.Factory.of(102, IconBackgroundColors.GREEN.top, IconBackgroundColors.GREEN.bottom, R.drawable.childgram_parental, getString(R.string.ChildgramParentalTitle), getString(R.string.ChildgramParentalSubtitle)));
             items.add(SettingCell.Factory.of(100, IconBackgroundColors.BLUE.top, IconBackgroundColors.BLUE.bottom, R.drawable.childgram_usage, getString(R.string.ChildgramUsageTitle), getString(R.string.ChildgramUsageSubtitle)));
         }
         if (ApplicationLoader.applicationLoaderInstance.isCustomUpdate()) {
@@ -818,6 +819,9 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
             return;
         }
         switch (item.id) {
+            case 102:
+                if (BuildVars.CHILDGRAM) presentSettingFragment(new ChildgramParentalActivity());
+                break;
             case 101:
                 if (ApplicationLoader.applicationLoaderInstance.isCustomUpdate() && getParentActivity() instanceof LaunchActivity) {
                     ((LaunchActivity) getParentActivity()).checkAppUpdate(true, new Browser.Progress());

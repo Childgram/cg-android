@@ -1,5 +1,6 @@
 package org.telegram.ui.web;
 
+import org.telegram.messenger.ChildgramParentalSettings;
 import org.telegram.messenger.ChildgramAccess;
 import static org.telegram.messenger.AndroidUtilities.dp;
 import static org.telegram.messenger.AndroidUtilities.readRes;
@@ -2142,7 +2143,7 @@ public abstract class BotWebViewContainer extends FrameLayout implements Notific
                         return;
                     }
 
-                    if (BuildVars.CHILDGRAM) {
+                    if (ChildgramParentalSettings.blockBots()) {
                         try {
                             JSONObject data = new JSONObject();
                             data.put("status", "cancelled");
@@ -2158,6 +2159,10 @@ public abstract class BotWebViewContainer extends FrameLayout implements Notific
                         .setTitle(getString(R.string.BotWebViewRequestWriteTitle))
                         .setMessage(getString(R.string.BotWebViewRequestWriteMessage))
                         .setPositiveButton(getString(R.string.BotWebViewRequestAllow), (di, w) -> {
+                            if (ChildgramParentalSettings.blockBots()) {
+                                ChildgramAccess.deny(org.telegram.ui.LaunchActivity.getSafeLastFragment());
+                                return;
+                            }
                             TL_bots.allowSendMessage req2 = new TL_bots.allowSendMessage();
                             req2.bot = MessagesController.getInstance(currentAccount).getInputUser(botUser);
                             ConnectionsManager.getInstance(currentAccount).sendRequest(req2, (res2, err2) -> AndroidUtilities.runOnUIThread(() -> {

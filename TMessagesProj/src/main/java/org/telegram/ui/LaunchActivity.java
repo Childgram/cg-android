@@ -4892,7 +4892,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                 }
             });
         } else if (group != null) {
-            if (state == 0) {
+            if (state == 0 || BuildVars.CHILDGRAM) {
                 final TLRPC.TL_messages_checkChatInvite req = new TLRPC.TL_messages_checkChatInvite();
                 req.hash = group;
                 requestId[0] = ConnectionsManager.getInstance(intentAccount).sendRequest(req, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
@@ -4902,7 +4902,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                             TLRPC.ChatInvite invite = (TLRPC.ChatInvite) response;
                             if (BuildVars.CHILDGRAM) {
                                 if (invite.chat != null) MessagesController.getInstance(intentAccount).putChat(invite.chat, false);
-                                if (!(invite instanceof TLRPC.TL_chatInviteAlready) || invite.chat == null || !ChildgramAccess.getInstance(intentAccount).isAllowed(-invite.chat.id)) {
+                                if (!ChildgramAccess.getInstance(intentAccount).isInviteAllowed(invite)) {
                                     dismissLoading.run();
                                     ChildgramAccess.deny(getLastFragment());
                                     return;
@@ -5007,11 +5007,6 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                     }
                 }), ConnectionsManager.RequestFlagFailOnServerErrors);
             } else if (state == 1) {
-                if (BuildVars.CHILDGRAM) {
-                    dismissLoading.run();
-                    ChildgramAccess.deny(getLastFragment());
-                    return;
-                }
                 TLRPC.TL_messages_importChatInvite req = new TLRPC.TL_messages_importChatInvite();
                 req.hash = group;
                 ConnectionsManager.getInstance(intentAccount).sendRequestTyped(req, null, (response, error) -> {
@@ -7000,6 +6995,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
     protected void onResume() {
         super.onResume();
         isResumed = true;
+        AndroidUtilities.runOnUIThread(this::showChildgramParentalSetup);
         AndroidUtilities.runOnUIThread(() -> org.telegram.messenger.ChildgramUsageTracker.onForeground(this, isResumed));
         pipActivityHandler.onResume();
         if (onResumeStaticCallback != null) {
@@ -7096,6 +7092,23 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
     }
 
     public static Runnable whenResumed;
+
+    private void showChildgramParentalSetup() {
+        if (!BuildVars.CHILDGRAM || !isResumed || isFinishing() || actionBarLayout == null
+                || org.telegram.messenger.ChildgramParentalSettings.isSetupAcknowledged()
+                || org.telegram.messenger.ChildgramParentalSettings.hasPin()) return;
+        if (SharedConfig.isWaitingForPasscodeEnter || actionBarLayout.checkTransitionAnimation()) {
+            AndroidUtilities.runOnUIThread(this::showChildgramParentalSetup, 200);
+            return;
+        }
+        for (INavigationLayout layout : new INavigationLayout[]{actionBarLayout, rightActionBarLayout, layersActionBarLayout}) {
+            if (layout == null) continue;
+            for (BaseFragment fragment : layout.getFragmentStack()) {
+                if (fragment instanceof ChildgramParentalActivity || fragment instanceof ChildgramParentalPinActivity) return;
+            }
+        }
+        presentFragment(new ChildgramParentalActivity());
+    }
 
     private void invalidateTabletMode() {
         Boolean wasTablet = AndroidUtilities.getWasTablet();
