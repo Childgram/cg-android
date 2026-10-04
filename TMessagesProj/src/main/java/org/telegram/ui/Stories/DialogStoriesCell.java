@@ -53,6 +53,7 @@ import androidx.recyclerview.widget.RecyclerView;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.BotWebViewVibrationEffect;
 import org.telegram.messenger.BuildConfig;
+import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.DialogObject;
 import org.telegram.messenger.Emoji;
 import org.telegram.messenger.FileLog;
@@ -158,7 +159,7 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
     LinearLayoutManager layoutManager;
     AnimatedTextView titleView;
     ActionBarAnimatedSubtitleOverlayContainer subtitleOverlayContainer;
-    ImageView telegramLogoView;
+    View telegramLogoView;
     ImageView emojiStatusView;
     AnimatedEmojiDrawable.SwapAnimatedEmojiDrawable statusDrawable;
     boolean drawCircleForce;
@@ -332,14 +333,28 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
         titleView.setFocusableInTouchMode(true);
         addView(titleView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        telegramLogoView = new ImageView(context);
-        telegramLogoView.setContentDescription(getString(R.string.AppName));
-        telegramLogoView.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-        telegramLogoView.setImageResource(R.drawable.telegram_logo_2);
-        telegramLogoView.setColorFilter(getTextLogoColor(), PorterDuff.Mode.MULTIPLY);
+        if (BuildVars.CHILDGRAM) {
+            TextView appNameView = new TextView(context);
+            appNameView.setText(getString(R.string.ChildgramAppName));
+            appNameView.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, dp(20));
+            appNameView.setTypeface(AndroidUtilities.bold());
+            appNameView.setTextColor(getTextLogoColor());
+            appNameView.setGravity(Gravity.CENTER_VERTICAL);
+            appNameView.setIncludeFontPadding(false);
+            appNameView.setSingleLine(true);
+            telegramLogoView = appNameView;
+            addView(telegramLogoView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
+        } else {
+            ImageView logoView = new ImageView(context);
+            logoView.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+            logoView.setImageResource(R.drawable.telegram_logo_2);
+            logoView.setColorFilter(getTextLogoColor(), PorterDuff.Mode.MULTIPLY);
+            telegramLogoView = logoView;
+            addView(telegramLogoView, LayoutHelper.createFrame(90, 22));
+        }
+        telegramLogoView.setContentDescription(getString(BuildVars.CHILDGRAM ? R.string.ChildgramAppName : R.string.AppName));
         telegramLogoView.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
         telegramLogoView.setFocusableInTouchMode(true);
-        addView(telegramLogoView, LayoutHelper.createFrame(90, 22));
 
         statusDrawable = new AnimatedEmojiDrawable.SwapAnimatedEmojiDrawable(null, dp(26));
         statusDrawable.center = true;
@@ -942,7 +957,8 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
             titleView.getDrawable().setRightPadding(lastViewRight - dp(12) + actionBar.menu.getVisibleItemsMeasuredWidthWithAlpha() * progress);
 
             telegramLogoView.setTranslationX(titleView.getTranslationX() + dp(1));
-            telegramLogoView.setTranslationY(bottomY + dp(14 + FAKE_TOP_PADDING + 4.333f) + translationOffset /*titleView.getTranslationY() + dpf2(37.33f)*/);
+            telegramLogoView.setTranslationY(bottomY + dp(14 + FAKE_TOP_PADDING + 4.333f) + translationOffset
+                    - (BuildVars.CHILDGRAM ? (telegramLogoView.getMeasuredHeight() - dp(22)) / 2f : 0));
 
             emojiStatusView.setTranslationX(titleView.getTranslationX() - dpf2(3.33f) + telegramLogoView.getMeasuredWidth());
             emojiStatusView.setTranslationY(bottomY + dp(14 - 11 + FAKE_TOP_PADDING + 4.333f) + translationOffset);
@@ -1156,7 +1172,11 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
         if (subtitleOverlayContainer != null) {
             subtitleOverlayContainer.updateColors();
         }
-        telegramLogoView.setColorFilter(getTextLogoColor(), PorterDuff.Mode.MULTIPLY);
+        if (telegramLogoView instanceof TextView) {
+            ((TextView) telegramLogoView).setTextColor(getTextLogoColor());
+        } else {
+            ((ImageView) telegramLogoView).setColorFilter(getTextLogoColor(), PorterDuff.Mode.MULTIPLY);
+        }
         AndroidUtilities.forEachViews(recyclerListView, view -> {
             StoryCell cell = (StoryCell) view;
             cell.invalidate();
