@@ -590,6 +590,12 @@ public class Theme {
                     }
                 }
             }
+            if (BuildVars.CHILDGRAM && id == CHILDGRAM_THEME_ACCENT_ID && isDarkTheme) {
+                // Filled buttons need a darker green than links to keep white labels readable.
+                currentColors.put(key_featuredStickers_addButton, 0xFF037C56);
+                currentColors.put(key_featuredStickers_addButton2, 0xFF227C5A);
+                currentColors.put(key_featuredStickers_addButtonPressed, 0xFF05633F);
+            }
             int myMessagesAccent = myMessagesAccentColor;
             if ((myMessagesAccentColor != 0 || accentColor != 0) && myMessagesGradientAccentColor1 != 0) {
                 int firstColor = myMessagesAccentColor != 0 ? myMessagesAccentColor : accentColor;
@@ -1542,6 +1548,13 @@ public class Theme {
             }
         }
 
+        private int getDefaultAccentId() {
+            if (BuildVars.CHILDGRAM && themeAccentsMap != null && themeAccentsMap.get(CHILDGRAM_THEME_ACCENT_ID) != null) {
+                return CHILDGRAM_THEME_ACCENT_ID;
+            }
+            return firstAccentIsDefault ? DEFALT_THEME_ACCENT_ID : 0;
+        }
+
         public String generateWallpaperName(ThemeAccent accent, boolean original) {
             if (accent == null) {
                 accent = getAccent(false);
@@ -1790,6 +1803,14 @@ public class Theme {
                 themeAccents.add(themeAccent);
             }
             accentBaseColor = themeAccentsMap.get(0).accentColor;
+            if (BuildVars.CHILDGRAM && ("Blue".equals(name) || "Dark Blue".equals(name) || "Night".equals(name))) {
+                ThemeAccent childgram = new ThemeAccent(themeAccentsMap.get(firstAccentIsDefault ? DEFALT_THEME_ACCENT_ID : 0));
+                childgram.id = CHILDGRAM_THEME_ACCENT_ID;
+                childgram.accentColor = isDark() ? 0xFF34C99C : 0xFF0F6B50;
+                themeAccentsMap.put(childgram.id, childgram);
+                themeAccents.add(childgram);
+                defaultAccentCount++;
+            }
         }
 
         @UiThread
@@ -2196,6 +2217,8 @@ public class Theme {
     };
 
     public static int DEFALT_THEME_ACCENT_ID = 99;
+    // Built-in accents stay below 100; user-created accents start at 100.
+    private static final int CHILDGRAM_THEME_ACCENT_ID = 98;
     public static int selectedAutoNightType = AUTO_NIGHT_TYPE_NONE;
     public static boolean autoNightScheduleByLocation;
     public static float autoNightBrighnessThreshold = 0.25f;
@@ -4101,7 +4124,7 @@ public class Theme {
             for (ThemeInfo info : themesDict.values()) {
                 if (info.assetName != null && info.accentBaseColor != 0) {
                     String accents = themeConfig.getString("accents_" + info.assetName, null);
-                    info.currentAccentId = themeConfig.getInt("accent_current_" + info.assetName, info.firstAccentIsDefault ? DEFALT_THEME_ACCENT_ID : 0);
+                    info.currentAccentId = themeConfig.getInt("accent_current_" + info.assetName, info.getDefaultAccentId());
                     ArrayList<ThemeAccent> newAccents = new ArrayList<>();
                     if (!TextUtils.isEmpty(accents)) {
                         try {
@@ -4235,7 +4258,7 @@ public class Theme {
                         sortAccents(info);
                     }
                     if (info.themeAccentsMap != null && info.themeAccentsMap.get(info.currentAccentId) == null) {
-                        info.currentAccentId = info.firstAccentIsDefault ? DEFALT_THEME_ACCENT_ID : 0;
+                        info.currentAccentId = info.getDefaultAccentId();
                     }
                     info.loadWallpapers(themeConfig);
                     ThemeAccent accent = info.getAccent(false);

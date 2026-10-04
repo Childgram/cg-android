@@ -396,6 +396,9 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
 
         int pagesCount = viewPager.getAdapter().getCount();
         bottomPages = new BottomPagesView(context, viewPager, pagesCount);
+        if (BuildVars.CHILDGRAM) {
+            bottomPages.setColor(-1, Theme.key_windowBackgroundWhiteBlueText4);
+        }
         frameContainerView.addView(bottomPages, LayoutHelper.createFrame(pagesCount * 11, 5, Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, ICON_HEIGHT_DP + 200, 0, 0));
 
         switchLanguageTextView = new TextView(context);
@@ -992,7 +995,7 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
         switchLanguageTextView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText4));
         startMessagingButton.setTextColor(Theme.getColor(Theme.key_featuredStickers_buttonText));
         startMessagingButton.setBackground(Theme.createSimpleSelectorRoundRectDrawable(dp(24), Color.TRANSPARENT, Theme.getColor(Theme.key_featuredStickers_addButtonPressed)));
-        darkThemeDrawable.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_featuredStickers_addButton), PorterDuff.Mode.SRC_IN));
+        darkThemeDrawable.setColorFilter(new PorterDuffColorFilter(Theme.getColor(BuildVars.CHILDGRAM ? Theme.key_windowBackgroundWhiteBlueText4 : Theme.key_featuredStickers_addButton), PorterDuff.Mode.SRC_IN));
         bottomPages.invalidate();
         if (fromTheme) {
             if (eglThread != null) {
