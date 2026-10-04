@@ -186,6 +186,11 @@ android {
     defaultConfig.versionCode = Integer.parseInt(childgramRelease ? CHILDGRAM_VERSION_CODE : APP_VERSION_CODE)
 
     if (childgram) {
+        def mapsKeyFile = rootProject.file('.local/google-maps-api-key.txt')
+        def mapsApiKey = mapsKeyFile.isFile() ? mapsKeyFile.text.trim() : ''
+        if (!(mapsApiKey ==~ /AIza[0-9A-Za-z_-]{35}/)) {
+            throw new GradleException('Childgram requires a Maps SDK for Android key in .local/google-maps-api-key.txt. Restrict it to the application package and signing certificate; see dev/README.md.')
+        }
         def childgramVariant = childgramDev ? 'afatDebug' : 'afatRelease'
         def childgramType = childgramDev ? buildTypes.debug : buildTypes.release
         sourceSets.maybeCreate(childgramVariant).manifest.srcFile rootProject.file('dev/AndroidManifest.xml')
@@ -194,6 +199,7 @@ android {
         childgramType.resValue 'string', 'AppNameBeta', childgramDev ? 'Childgram Dev' : 'Childgram'
         childgramType.resValue 'string', 'childgram_account_type', APP_PACKAGE + (childgramDev ? '.beta' : '')
         childgramType.manifestPlaceholders.childgramPushEnabled = (!rootProject.childgramFirebase.isEmpty()).toString()
+        childgramType.manifestPlaceholders.childgramMapsApiKey = mapsApiKey
         rootProject.childgramFirebase.each { name, value ->
             childgramType.resValue 'string', name, value
         }

@@ -31,6 +31,14 @@ trap 'echo "Release verification failed at line $LINENO." >&2' ERR
     grep -q "^application-label:'Childgram'$" "$out/badging.txt"
     grep -q "^native-code: 'arm64-v8a'$" "$out/badging.txt"
     "$buildtools/aapt" dump xmltree "$apk" AndroidManifest.xml > "$out/manifest.txt"
+    python3 - <<'PY'
+from pathlib import Path
+import re
+key = Path('.local/google-maps-api-key.txt').read_text().strip()
+manifest = Path('.local/checks/release/manifest.txt').read_text()
+entries = re.findall(r'E: meta-data[^\n]*\n((?:[ \t]+A:[^\n]*\n)+)', manifest)
+assert any('"com.google.android.maps.v2.API_KEY"' in entry and '"' + key + '"' in entry for entry in entries), 'Maps API key missing or incorrect in release APK'
+PY
     for authority in org.childgram.provider org.childgram.notification_image_provider org.childgram.call_sound_provider; do
         grep -Fq "\"$authority\"" "$out/manifest.txt"
     done

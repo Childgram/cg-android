@@ -77,12 +77,15 @@ jobs:
           CHILDGRAM_RELEASE_KEY_BASE64: ${{ secrets.CHILDGRAM_RELEASE_KEY_BASE64 }}
           CHILDGRAM_RELEASE_KEY_PASSWORD: ${{ secrets.CHILDGRAM_RELEASE_KEY_PASSWORD }}
           CHILDGRAM_GOOGLE_SERVICES_JSON: ${{ secrets.CHILDGRAM_GOOGLE_SERVICES_JSON }}
+          CHILDGRAM_GOOGLE_MAPS_API_KEY: ${{ secrets.CHILDGRAM_GOOGLE_MAPS_API_KEY }}
         run: |
           python3 - <<'PY'
           import base64, os, pathlib, re
           os.umask(0o077)
-          names = ('TELEGRAM_API_ID', 'TELEGRAM_API_HASH', 'CHILDGRAM_RELEASE_KEY_BASE64', 'CHILDGRAM_RELEASE_KEY_PASSWORD', 'CHILDGRAM_GOOGLE_SERVICES_JSON')
-          assert all(os.environ.get(name) for name in names), 'Configure the five release environment secrets first'
+          names = ('TELEGRAM_API_ID', 'TELEGRAM_API_HASH', 'CHILDGRAM_RELEASE_KEY_BASE64', 'CHILDGRAM_RELEASE_KEY_PASSWORD', 'CHILDGRAM_GOOGLE_SERVICES_JSON', 'CHILDGRAM_GOOGLE_MAPS_API_KEY')
+          assert all(os.environ.get(name) for name in names), 'Configure the six release environment secrets first'
+          maps_key = os.environ['CHILDGRAM_GOOGLE_MAPS_API_KEY'].strip()
+          assert re.fullmatch(r'AIza[0-9A-Za-z_-]{35}', maps_key), 'Invalid Maps API key'
           assert re.fullmatch(r'[1-9][0-9]*', os.environ['TELEGRAM_API_ID']), 'Invalid API ID'
           assert re.fullmatch(r'[0-9a-fA-F]{32}', os.environ['TELEGRAM_API_HASH']), 'Invalid API hash'
           password = os.environ['CHILDGRAM_RELEASE_KEY_PASSWORD']
@@ -94,6 +97,7 @@ jobs:
           (local / 'signing/password.txt').write_text(password + '\n')
           (local / 'firebase').mkdir()
           (local / 'firebase/google-services.json').write_text(os.environ['CHILDGRAM_GOOGLE_SERVICES_JSON'])
+          (local / 'google-maps-api-key.txt').write_text(maps_key + '\n')
           PY
       - name: Build and verify signed ARM64 APK in Docker
         run: |
@@ -121,3 +125,4 @@ jobs:
           sudo rm -rf .local/signing
           sudo rm -rf .local/firebase
           sudo rm -f .local/telegram.properties
+          sudo rm -f .local/google-maps-api-key.txt
