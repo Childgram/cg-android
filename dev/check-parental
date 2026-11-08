@@ -13,7 +13,7 @@ classes=TMessagesProj/build/intermediates/runtime_library_classes_jar/debug/bund
 android="$ANDROID_HOME/platforms/android-36/android.jar"
 buildtools="$ANDROID_HOME/build-tools/36.0.0"
 mkdir -p "$out/classes" "$out/dex"
-javac -cp "$classes:$android" -d "$out/classes" dev/tests/ChildgramParentalInstrumentation.java
+javac -cp "$classes:$android" -d "$out/classes" dev/tests/ChildgramParentalInstrumentation.java dev/tests/ChildgramWidgetChecks.java
 cat > "$out/AndroidManifest.xml" <<'EOF'
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.childgram.parentalchecks">
     <application android:label="Childgram parental checks" />

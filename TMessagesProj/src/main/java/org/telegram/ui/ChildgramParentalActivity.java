@@ -108,6 +108,8 @@ public final class ChildgramParentalActivity extends UniversalFragment {
         items.add(UItem.asCheck(4, getString(R.string.ChildgramParentalInvites)).setChecked(ChildgramParentalSettings.blockInvites()));
         items.add(UItem.asShadow(getString(R.string.ChildgramParentalRestrictionsInfo)));
         items.add(UItem.asShadow(getString(R.string.ChildgramParentalInvitesInfo)));
+        items.add(UItem.asCheck(8, getString(R.string.ChildgramParentalWidgets)).setChecked(ChildgramParentalSettings.blockWidgets()));
+        items.add(UItem.asShadow(getString(R.string.ChildgramParentalWidgetsInfo)));
         items.add(UItem.asHeader(getString(R.string.ChildgramParentalPinHeader)));
         boolean hasPin = ChildgramParentalSettings.hasPin();
         items.add(UItem.asButton(5, getString(hasPin ? R.string.ChildgramParentalChangePin : R.string.ChildgramParentalSetPin)));
@@ -131,7 +133,7 @@ public final class ChildgramParentalActivity extends UniversalFragment {
             case 6:
                 showDialog(new AlertDialog.Builder(getParentActivity())
                         .setTitle(getString(R.string.ChildgramParentalRemovePin))
-                        .setMessage(getString(R.string.ChildgramParentalNoPin))
+                        .setMessage(getString(R.string.ChildgramParentalRemovePinInfo))
                         .setNegativeButton(getString(R.string.Cancel), null)
                         .setPositiveButton(getString(R.string.ChildgramParentalRemovePin), (dialog, which) -> {
                             if (!authenticated || isPaused) return;
@@ -143,6 +145,13 @@ public final class ChildgramParentalActivity extends UniversalFragment {
                         }).create());
                 return;
             case 7: finishFragment(); return;
+            case 8:
+                if (ChildgramParentalSettings.blockWidgets() && !ChildgramParentalSettings.hasPin()) {
+                    setupPin();
+                    return;
+                }
+                ChildgramParentalSettings.setBlockWidgets(!ChildgramParentalSettings.blockWidgets());
+                break;
         }
         listView.adapter.update(false);
     }

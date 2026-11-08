@@ -45,6 +45,9 @@ public class BuildVars {
 
     // works only on official app ids, disable on your forks
     public static boolean SUPPORTS_PASSKEYS = !BuildConfig.CHILDGRAM;
+    // the second main tab: News, or Contacts as before them
+
+    public static boolean SUPPORTS_FPNV = !BuildConfig.CHILDGRAM;
 
     static {
         if (ApplicationLoader.applicationContext != null) {

@@ -6,6 +6,8 @@ import android.os.SystemClock;
 import android.provider.Settings;
 import android.util.Base64;
 
+import org.telegram.utils.twidget.WidgetMedia;
+
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 
@@ -37,6 +39,16 @@ public final class ChildgramParentalSettings {
 
     public static boolean blockInvites() {
         return BuildVars.CHILDGRAM && preferences().getBoolean("block_invites", true);
+    }
+
+    public static boolean blockWidgets() {
+        return BuildVars.CHILDGRAM && (!hasPin() || preferences().getBoolean("block_widgets", true));
+    }
+
+    public static synchronized void setBlockWidgets(boolean block) {
+        if (!block && !hasPin()) return;
+        preferences().edit().putBoolean("block_widgets", block).apply();
+        WidgetMedia.onParentalSettingsChanged();
     }
 
     public static void setBlockChannels(boolean block) {
@@ -89,7 +101,10 @@ public final class ChildgramParentalSettings {
 
     /** Caller must already have authenticated access to parental settings. */
     public static synchronized boolean removePin() {
-        return clearRetry(preferences().edit()).remove("pin_hash").remove("pin_salt").commit();
+        boolean removed = clearRetry(preferences().edit()).remove("pin_hash").remove("pin_salt")
+                .putBoolean("block_widgets", true).commit();
+        WidgetMedia.onParentalSettingsChanged();
+        return removed;
     }
 
     public static synchronized boolean verifyPin(String pin) {

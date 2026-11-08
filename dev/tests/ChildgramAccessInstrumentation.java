@@ -12,9 +12,16 @@ import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.tl.TL_account;
 import org.telegram.ui.ChatActivity;
+import org.telegram.ui.PhotoViewer;
 import org.telegram.ui.ProfileActivity;
 import org.telegram.messenger.browser.Browser;
+import org.telegram.utils.pip.PipContent;
+import org.telegram.utils.pip.PipCoordinator;
+import org.telegram.utils.pip.PipSession;
 
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
+import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -110,10 +117,11 @@ public final class ChildgramAccessInstrumentation extends Instrumentation {
         if (!condition) throw new AssertionError(label);
     }
 
-    private void runChecks() {
+    private void runChecks() throws Exception {
         expect("childgram build required", BuildVars.CHILDGRAM);
         int account = UserConfig.selectedAccount;
         expect("activated test account required", UserConfig.getInstance(account).isClientActivated());
+        checkVideoUsage(account);
         MessagesController controller = MessagesController.getInstance(account);
         expect("childgram disables embedded browser preference", !controller.isWebBrowserInAppEnabled());
         expect("childgram ignores embedded browser exceptions", !controller.isWebBrowserOpenInApp("https://example.org/test"));
@@ -235,6 +243,68 @@ public final class ChildgramAccessInstrumentation extends Instrumentation {
         expect("leaving parent revokes comments", !policy.isFragmentAllowed(comments));
         expect("leaving parent revokes comment sending", !policy.canSend(-discussion.id, root));
         expect("leaving parent revokes comment media", !policy.canViewMessage(root));
+    }
+
+    private void checkVideoUsage(int account) throws Exception {
+        TLRPC.TL_message message = new TLRPC.TL_message();
+        message.message = "";
+        message.peer_id = new TLRPC.TL_peerUser();
+        message.peer_id.user_id = UserConfig.getInstance(account).getClientUserId();
+        message.media = new TLRPC.TL_messageMediaDocument();
+        message.media.document = new TLRPC.TL_document();
+        message.media.document.mime_type = "video/mp4";
+        message.media.document.attributes.add(new TLRPC.TL_documentAttributeVideo());
+        MessageObject video = new MessageObject(account, message, false, false);
+        PhotoViewer viewer = new PhotoViewer();
+        setField(viewer, "isVisible", true);
+        setField(viewer, "placeProvider", new PhotoViewer.EmptyPhotoViewerProvider());
+        setField(viewer, "parentActivity", new Activity());
+        setField(viewer, "currentMessageObject", video);
+
+        // No decoder, media file or global player is started by this isolated fixture.
+        Class<?> playerClass = Class.forName("org.telegram.ui.Components.VideoPlayer");
+        Object player = playerClass.getConstructor(boolean.class, boolean.class).newInstance(false, true);
+        Field exoField = playerClass.getField("player");
+        boolean[] playing = {true};
+        try {
+            exoField.set(player, Proxy.newProxyInstance(exoField.getType().getClassLoader(),
+                    new Class<?>[]{exoField.getType()}, (proxy, method, args) -> {
+                        if (method.getName().equals("isPlaying")) return playing[0];
+                        throw new AssertionError("unexpected player call in usage fixture");
+                    }));
+            setField(viewer, "videoPlayer", player);
+            expect("full-screen video belongs to its chat", viewer.getChildgramVideoMessage() == video);
+            expect("playing full-screen video counts", viewer.isChildgramVideoPlaying());
+            playing[0] = false;
+            expect("paused video retains chat context", viewer.getChildgramVideoMessage() == video);
+            expect("paused video does not count as playback", !viewer.isChildgramVideoPlaying());
+            playing[0] = true;
+            setField(viewer, "pipPrimaryHidden", true);
+            expect("hidden primary during system PiP transition is excluded", viewer.getChildgramVideoMessage() == null);
+            setField(viewer, "pipPrimaryHidden", false);
+
+            Constructor<PipSession> constructor = PipSession.class.getDeclaredConstructor(PipCoordinator.class, PipContent.class);
+            constructor.setAccessible(true);
+            PipSession session = constructor.newInstance(null, null);
+            setField(viewer, "pipSession", session);
+            expect("primary PiP session keeps full-screen playback", viewer.isChildgramVideoPlaying());
+            setField(session, "state", PipSession.STATE_FLOATING);
+            expect("floating session without legacy inline flag is excluded", viewer.getChildgramVideoMessage() == null);
+            expect("floating playback does not count", !viewer.isChildgramVideoPlaying());
+            setField(session, "state", PipSession.STATE_SYSTEM);
+            expect("system session before Android mode callback is excluded", viewer.getChildgramVideoMessage() == null);
+            setField(session, "state", PipSession.STATE_PRIMARY);
+            expect("return to full-screen resumes playback accounting", viewer.isChildgramVideoPlaying());
+        } finally {
+            exoField.set(player, null);
+            playerClass.getMethod("releasePlayer", boolean.class).invoke(player, false);
+        }
+    }
+
+    private static void setField(Object object, String name, Object value) throws Exception {
+        Field field = object.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        field.set(object, value);
     }
 
     private MessageObject comment(int account, long discussion, long channel, int post, int id) {

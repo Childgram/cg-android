@@ -6,17 +6,26 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.os.SystemClock;
+import android.view.View;
 import android.widget.FrameLayout;
 
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.INavigationLayout;
+import org.telegram.ui.ActionBar.BaseFragment;
+import org.telegram.ui.ChildgramParentalActivity;
 import org.telegram.ui.ChildgramParentalPinActivity;
 import org.telegram.ui.CodeFieldContainer;
 import org.telegram.ui.CodeNumberField;
+import org.telegram.ui.Components.UItem;
+import org.telegram.ui.Components.UniversalAdapter;
+import org.telegram.ui.Components.UniversalRecyclerView;
+import org.telegram.utils.twidget.ChildgramWidgetChecks;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -43,6 +52,8 @@ public final class ChildgramParentalInstrumentation extends Instrumentation {
             expect("Childgram build required", BuildVars.CHILDGRAM);
             expect("clear local test fixture", preferences.edit().clear().commit());
             checkSettings();
+            assertions += ChildgramWidgetChecks.run(this);
+            checkWidgetControls();
             checkInvitationOptOut();
             checkAccess();
             checkPin();
@@ -244,23 +255,96 @@ public final class ChildgramParentalInstrumentation extends Instrumentation {
     private void checkSettings() {
         expect("all restrictions default on", ChildgramParentalSettings.blockChannels()
                 && ChildgramParentalSettings.blockGroups() && ChildgramParentalSettings.blockBots()
-                && ChildgramParentalSettings.blockInvites());
+                && ChildgramParentalSettings.blockInvites() && ChildgramParentalSettings.blockWidgets());
         expect("fresh install has no PIN", !ChildgramParentalSettings.hasPin());
         expect("fresh install requires setup", !ChildgramParentalSettings.isSetupAcknowledged());
-        String[] keys = {"block_channels", "block_groups", "block_bots", "block_invites"};
+        expect("persist unprotected widget opt-out fixture", preferences.edit().putBoolean("block_widgets", false).commit());
+        expect("widgets stay blocked without a PIN", ChildgramParentalSettings.blockWidgets());
+        expect("restore widget default", preferences.edit().remove("block_widgets").commit());
+        expect("install independent-toggle PIN fixture", ChildgramParentalSettings.setPin("4826"));
+        String[] keys = {"block_channels", "block_groups", "block_bots", "block_invites", "block_widgets"};
         for (int disabled = 0; disabled < keys.length; disabled++) {
             // Raw local preferences avoid the real invite setter's server reconciliation.
             expect("persist toggle fixture", preferences.edit().putBoolean(keys[disabled], false).commit());
             boolean[] values = {ChildgramParentalSettings.blockChannels(), ChildgramParentalSettings.blockGroups(),
-                    ChildgramParentalSettings.blockBots(), ChildgramParentalSettings.blockInvites()};
+                    ChildgramParentalSettings.blockBots(), ChildgramParentalSettings.blockInvites(), ChildgramParentalSettings.blockWidgets()};
             for (int i = 0; i < values.length; i++) expect("toggle affects only its restriction", values[i] == (i != disabled));
             expect("persist restored toggle", preferences.edit().remove(keys[disabled]).commit());
         }
+        expect("remove independent-toggle PIN fixture", ChildgramParentalSettings.removePin());
         ChildgramParentalSettings.setSetupAcknowledged(true);
         expect("setup acknowledgement persisted", ChildgramParentalSettings.isSetupAcknowledged()
                 && preferences.getBoolean("setup_acknowledged", false));
         ChildgramParentalSettings.setSetupAcknowledged(false);
         expect("setup acknowledgement can be reset", !ChildgramParentalSettings.isSetupAcknowledged());
+    }
+
+    private void checkWidgetControls() throws Exception {
+        ChildgramParentalActivity[] screen = new ChildgramParentalActivity[1];
+        BaseFragment[] presented = new BaseFragment[1];
+        Method click = ChildgramParentalActivity.class.getDeclaredMethod("onClick", UItem.class, View.class,
+                int.class, float.class, float.class);
+        click.setAccessible(true);
+        Field authenticated = ChildgramParentalActivity.class.getDeclaredField("authenticated");
+        authenticated.setAccessible(true);
+        Field paused = BaseFragment.class.getDeclaredField("isPaused");
+        paused.setAccessible(true);
+        try {
+            onMainChecked(() -> {
+                screen[0] = new ChildgramParentalActivity();
+                FrameLayout host = new FrameLayout(getTargetContext());
+                screen[0].setParentLayout((INavigationLayout) Proxy.newProxyInstance(INavigationLayout.class.getClassLoader(),
+                        new Class<?>[]{INavigationLayout.class}, (proxy, method, args) -> {
+                            if (method.getName().equals("getView")) return host;
+                            if (method.getName().equals("getLastFragment")) return screen[0];
+                            if (method.getName().equals("presentFragment")) {
+                                presented[0] = (BaseFragment) args[0];
+                                return true;
+                            }
+                            if (method.getReturnType() == boolean.class) return false;
+                            return null;
+                        }));
+                screen[0].listView = new UniversalRecyclerView(getTargetContext(), UserConfig.selectedAccount,
+                        screen[0].getClassGuid(), (items, adapter) -> {}, (item, view, pos, x, y) -> {},
+                        (item, view, pos, x, y) -> false, null);
+                host.addView(screen[0].listView);
+                Method fill = ChildgramParentalActivity.class.getDeclaredMethod("fillItems", ArrayList.class, UniversalAdapter.class);
+                fill.setAccessible(true);
+                ArrayList<UItem> items = new ArrayList<>();
+                fill.invoke(screen[0], items, null);
+                UItem widgets = null;
+                for (UItem item : items) if (item.id == 8) widgets = item;
+                expect("parental section exposes checked widget restriction", widgets != null && widgets.checked);
+                paused.setBoolean(screen[0], false);
+                click.invoke(screen[0], widgets, null, 0, 0f, 0f);
+                expect("unauthenticated click cannot enable widgets", ChildgramParentalSettings.blockWidgets() && presented[0] == null);
+                authenticated.setBoolean(screen[0], true);
+                click.invoke(screen[0], widgets, null, 0, 0f, 0f);
+                expect("no-PIN click opens parental PIN setup", presented[0] instanceof ChildgramParentalPinActivity);
+                Field setup = ChildgramParentalPinActivity.class.getDeclaredField("setup");
+                setup.setAccessible(true);
+                expect("missing PIN requires creation, not verification", setup.getBoolean(presented[0]));
+                expect("opening PIN setup does not enable widgets", ChildgramParentalSettings.blockWidgets());
+                expect("install widget-control PIN fixture", ChildgramParentalSettings.setPin("4826"));
+                expect("installing PIN does not automatically enable widgets", ChildgramParentalSettings.blockWidgets());
+                click.invoke(screen[0], widgets, null, 0, 0f, 0f);
+                expect("authenticated parent can allow widgets", !ChildgramParentalSettings.blockWidgets());
+                screen[0].onPause();
+                expect("backgrounding resets parental authentication", !authenticated.getBoolean(screen[0]));
+                click.invoke(screen[0], widgets, null, 0, 0f, 0f);
+                expect("backgrounded screen cannot change widget restriction", !ChildgramParentalSettings.blockWidgets());
+                paused.setBoolean(screen[0], false);
+                click.invoke(screen[0], widgets, null, 0, 0f, 0f);
+                expect("return requires authentication before widget changes", !ChildgramParentalSettings.blockWidgets());
+                expect("remove widget-control PIN fixture", ChildgramParentalSettings.removePin());
+                expect("removing PIN restores widget restriction", ChildgramParentalSettings.blockWidgets());
+                expect("removing PIN preserves other restrictions", ChildgramParentalSettings.blockChannels()
+                        && ChildgramParentalSettings.blockGroups() && ChildgramParentalSettings.blockBots()
+                        && ChildgramParentalSettings.blockInvites());
+            });
+        } finally {
+            if (screen[0] != null) onMainChecked(screen[0]::onFragmentDestroy);
+        }
     }
 
     private void checkPin() {
@@ -293,7 +377,7 @@ public final class ChildgramParentalInstrumentation extends Instrumentation {
         expect("removal preserves setup acknowledgement", ChildgramParentalSettings.isSetupAcknowledged());
         expect("PIN operations preserve restrictions", ChildgramParentalSettings.blockChannels()
                 && ChildgramParentalSettings.blockGroups() && ChildgramParentalSettings.blockBots()
-                && ChildgramParentalSettings.blockInvites());
+                && ChildgramParentalSettings.blockInvites() && ChildgramParentalSettings.blockWidgets());
     }
 
     private void checkAccess() {

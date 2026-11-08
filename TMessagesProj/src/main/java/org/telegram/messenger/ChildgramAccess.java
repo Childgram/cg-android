@@ -96,6 +96,11 @@ public final class ChildgramAccess extends BaseController {
     }
 
     public void check(long dialogId, BaseFragment source, Runnable allowed) {
+        check(dialogId, source, allowed, () -> {});
+    }
+
+    /** Also completes a pending widget request when access cannot be granted. */
+    public void check(long dialogId, BaseFragment source, Runnable allowed, Runnable denied) {
         AndroidUtilities.runOnUIThread(() -> {
             if (isAllowed(dialogId)) {
                 allowed.run();
@@ -106,23 +111,26 @@ public final class ChildgramAccess extends BaseController {
                 TLRPC.User storedUser = dialogId > 0 ? getMessagesStorage().getUser(dialogId) : null;
                 TLRPC.Chat storedChat = dialogId < 0 ? getMessagesStorage().getChat(-dialogId) : null;
                 AndroidUtilities.runOnUIThread(() -> {
-                    if (owner != getUserConfig().getClientUserId()) return;
+                    if (owner != getUserConfig().getClientUserId()) {
+                        denied.run();
+                        return;
+                    }
                     if (storedUser != null) getMessagesController().putUser(storedUser, true);
                     if (storedChat != null) getMessagesController().putChat(storedChat, true);
-                    checkResolved(dialogId, source, allowed, owner);
+                    checkResolved(dialogId, source, allowed, denied, owner);
                 });
             });
         });
     }
 
-    private void checkResolved(long dialogId, BaseFragment source, Runnable allowed, long owner) {
+    private void checkResolved(long dialogId, BaseFragment source, Runnable allowed, Runnable denied, long owner) {
         if (isAllowed(dialogId)) {
             allowed.run();
             return;
         }
         int state = getConnectionsManager().getConnectionState();
         if (state != ConnectionsManager.ConnectionStateConnected && state != ConnectionsManager.ConnectionStateUpdating) {
-            failed(source);
+            failed(source, denied);
             return;
         }
         if (dialogId < 0) {
@@ -147,51 +155,60 @@ public final class ChildgramAccess extends BaseController {
                 req.id.add(chat.id);
                 request = req;
             } else {
-                failed(source);
+                failed(source, denied);
                 return;
             }
             getConnectionsManager().sendRequest(request, (res, err) -> AndroidUtilities.runOnUIThread(() -> {
-                if (owner != getUserConfig().getClientUserId()) return;
+                if (owner != getUserConfig().getClientUserId()) {
+                    denied.run();
+                    return;
+                }
                 if (res instanceof TLRPC.messages_Chats) {
                     TLRPC.messages_Chats chats = (TLRPC.messages_Chats) res;
                     getMessagesController().putChats(chats.chats, false);
                     getMessagesStorage().putUsersAndChats(null, chats.chats, true, true);
-                    if (isAllowed(dialogId)) allowed.run(); else deny(source);
+                    if (isAllowed(dialogId)) allowed.run(); else deny(source, denied);
                 } else if (isAllowed(dialogId)) {
                     allowed.run();
                 } else {
-                    failed(source);
+                    failed(source, denied);
                 }
             }));
             return;
         }
         TLRPC.User user = getMessagesController().getUser(dialogId);
         if (user == null) {
-            failed(source);
+            failed(source, denied);
             return;
         }
         if (user.min) {
             TLRPC.TL_users_getUsers req = new TLRPC.TL_users_getUsers();
             req.id.add(getMessagesController().getInputUser(user));
             getConnectionsManager().sendRequest(req, (res, err) -> AndroidUtilities.runOnUIThread(() -> {
-                if (owner != getUserConfig().getClientUserId()) return;
+                if (owner != getUserConfig().getClientUserId()) {
+                    denied.run();
+                    return;
+                }
                 if (res instanceof Vector) {
                     for (Object item : ((Vector<?>) res).objects) {
                         if (item instanceof TLRPC.User && ((TLRPC.User) item).id == dialogId && !((TLRPC.User) item).min) {
                             getMessagesController().putUser((TLRPC.User) item, false);
-                            checkResolved(dialogId, source, allowed, owner);
+                            checkResolved(dialogId, source, allowed, denied, owner);
                             return;
                         }
                     }
                 }
-                if (isAllowed(dialogId)) allowed.run(); else failed(source);
+                if (isAllowed(dialogId)) allowed.run(); else failed(source, denied);
             }));
             return;
         }
         TL_bots.canSendMessage req = new TL_bots.canSendMessage();
         req.bot = getMessagesController().getInputUser(user);
         getConnectionsManager().sendRequest(req, (res, err) -> AndroidUtilities.runOnUIThread(() -> {
-            if (owner != getUserConfig().getClientUserId()) return;
+            if (owner != getUserConfig().getClientUserId()) {
+                denied.run();
+                return;
+            }
             final String key = botKey(dialogId);
             if (res instanceof TLRPC.TL_boolTrue) {
                 botChecks.put(dialogId, SystemClock.elapsedRealtime());
@@ -200,13 +217,23 @@ public final class ChildgramAccess extends BaseController {
             } else if (res instanceof TLRPC.TL_boolFalse) {
                 botChecks.remove(dialogId);
                 MessagesController.getMainSettings(currentAccount).edit().remove(key).apply();
-                if (isAllowed(dialogId)) allowed.run(); else deny(source);
+                if (isAllowed(dialogId)) allowed.run(); else deny(source, denied);
             } else if (isAllowed(dialogId)) {
                 allowed.run();
             } else {
-                failed(source);
+                failed(source, denied);
             }
         }));
+    }
+
+    private static void deny(BaseFragment source, Runnable denied) {
+        denied.run();
+        deny(source);
+    }
+
+    private static void failed(BaseFragment source, Runnable denied) {
+        denied.run();
+        failed(source);
     }
 
     public static void deny(BaseFragment source) {
