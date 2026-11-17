@@ -2,8 +2,14 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+if ! [[ $# == 0 ||
+        ($# == 1 && ($1 == --device || $1 == --usage-device || $1 == --usage-ui-device)) ||
+        ($# == 2 && $1 == --pip-device && ($2 == system || $2 == overlay)) ]]; then
+    echo 'Usage: ./dev/check [--device | --usage-device | --usage-ui-device | --pip-device {system|overlay}]' >&2
+    exit 2
+fi
+
 if [[ "${1:-}" == --pip-device ]]; then
-    [[ "${2:-}" == system || "${2:-}" == overlay ]] || { printf '%s\n' 'Usage: ./dev/check --pip-device system|overlay' >&2; exit 2; }
     mkdir -p .local/checks/childgram/assets
     ffmpeg -hide_banner -loglevel error -y -f lavfi -i 'testsrc2=size=320x180:rate=20' \
         -t 90 -an -c:v libx264 -preset ultrafast -crf 35 -pix_fmt yuv420p \
@@ -41,7 +47,7 @@ EOF
     fi
 '
 
-if [[ "${1:-}" == --device || "${1:-}" == --usage-device || "${1:-}" == --usage-ui-device || "${1:-}" == --pip-device ]]; then
+if (( $# > 0 )); then
     ./dev/emulator adb install -r .local/checks/childgram/tests.apk
     args=(-e verify_usage true)
     if [[ "${1:-}" == --device ]]; then args+=(-e verify_privacy true); else args+=(-e usage_only true); fi
