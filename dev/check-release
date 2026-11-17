@@ -1,18 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-[[ $# == 0 || ( $# == 1 && "${1:-}" == --device ) ]] || { echo 'Usage: ./dev/check-release [--device]' >&2; exit 1; }
+if ! [[ $# == 0 || ($# == 1 && $1 == --device) || ($# == 2 && $1 == --device && $2 == parental) ]]; then
+    echo 'Usage: ./dev/check-release [--device [parental]]' >&2
+    exit 1
+fi
 
-# Inspect the built artifact, not just its Gradle configuration.
 docker run --rm -i --network none --platform linux/amd64 \
-    -v "$PWD:/workspace" -w /workspace childgram-android:36-ndk27 bash -se -- "$@" <<'CHECK'
+    -v "$PWD:/workspace:ro" -v "$PWD/.local/checks/release:/workspace/.local/checks/release" \
+    -w /workspace childgram-android:36-ndk27 bash -se -- "$@" <<'CHECK'
 set -euo pipefail
 trap 'echo "Release verification failed at line $LINENO." >&2' ERR
-    umask 077
-    apk=TMessagesProj_App/build/outputs/apk/afat/release/app.apk
-    out=.local/checks/release
-    buildtools="$ANDROID_HOME/build-tools/36.0.0"
-    mkdir -p "$out"
+umask 077
+out=.local/checks/release
+buildtools="$ANDROID_HOME/build-tools/36.0.0"
+android="$ANDROID_HOME/platforms/android-36/android.jar"
+version_code=$(sed -n 's/^CHILDGRAM_VERSION_CODE=//p' gradle.properties)
+version_name=$(sed -n 's/^CHILDGRAM_VERSION_NAME=//p' gradle.properties)
+
+check_artifact() {
+    local apk=TMessagesProj_App/build/outputs/apk/afat/release/app.apk
     "$buildtools/apksigner" verify --verbose --print-certs "$apk" > "$out/signature.txt"
     expected=$(keytool -exportcert -keystore .local/signing/childgram-release.p12 \
         -storepass:file .local/signing/password.txt -alias childgram | sha256sum | cut -d " " -f 1)
@@ -21,8 +28,6 @@ trap 'echo "Release verification failed at line $LINENO." >&2' ERR
     [[ "$actual" == "$expected" ]] || { echo "Unexpected APK signing certificate." >&2; exit 1; }
     "$buildtools/aapt" dump badging "$apk" > "$out/badging.txt"
     grep -q "^package: name='org[.]childgram' " "$out/badging.txt"
-    version_code=$(sed -n 's/^CHILDGRAM_VERSION_CODE=//p' gradle.properties)
-    version_name=$(sed -n 's/^CHILDGRAM_VERSION_NAME=//p' gradle.properties)
     grep -Fq "versionCode='$version_code'" "$out/badging.txt"
     grep -Fq "versionName='$version_name'" "$out/badging.txt"
     if grep -q "^application-debuggable" "$out/badging.txt"; then
@@ -58,26 +63,49 @@ PY
     sha256sum "$apk" > "$out/apk.sha256"
     printf "Release verified: org.childgram; Childgram enabled; non-debuggable; ARM64.\nCertificate SHA-256: %s\n" "$actual"
     cat "$out/apk.sha256"
-    if [[ "${1:-}" == --device ]]; then
-        classes=TMessagesProj/build/intermediates/runtime_library_classes_jar/release/bundleLibRuntimeToJarRelease/classes.jar
-        android="$ANDROID_HOME/platforms/android-36/android.jar"
-        mkdir -p "$out/classes" "$out/dex"
-        javac -cp "$classes:$android" -d "$out/classes" \
-            dev/tests/ChildgramReleaseInstrumentation.java dev/tests/ChildgramUsageStorageInstrumentation.java \
-            dev/tests/ChildgramUpdateInstrumentation.java
-        cat > "$out/AndroidManifest.xml" <<EOF
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.childgram.releasechecks">
+}
+
+# Both runners use the release signature. The widget check needs only the Android SDK.
+build_instrumentation() {
+    local dir=$1 package=$2 runner=$3 app_classes=$4
+    shift 4
+    local classpath="$android"
+    local d8_args=(--min-api 26 --lib "$android")
+    if [[ -n "$app_classes" ]]; then
+        classpath="$app_classes:$android"
+        d8_args+=(--classpath "$app_classes")
+    fi
+    mkdir -p "$dir/dex"
+    local classes_dir
+    classes_dir=$(mktemp -d)
+    javac -cp "$classpath" -d "$classes_dir" "$@"
+    jar cf "$dir/tests.jar" -C "$classes_dir" .
+    "$buildtools/d8" "${d8_args[@]}" --output "$dir/dex" "$dir/tests.jar"
+    cat > "$dir/AndroidManifest.xml" <<EOF
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="$package">
     <application android:label="Childgram release checks" />
-    <instrumentation android:name="org.telegram.messenger.ChildgramReleaseInstrumentation" android:targetPackage="org.childgram" />
+    <instrumentation android:name="$runner" android:targetPackage="org.childgram" />
 </manifest>
 EOF
-        jar cf "$out/tests.jar" -C "$out/classes" .
-        "$buildtools/d8" --min-api 26 --lib "$android" --classpath "$classes" --output "$out/dex" "$out/tests.jar"
-        "$buildtools/aapt2" link -I "$android" --manifest "$out/AndroidManifest.xml" --min-sdk-version 26 --target-sdk-version 34 -o "$out/tests-unaligned.apk"
-        jar uf "$out/tests-unaligned.apk" -C "$out/dex" classes.dex
-        "$buildtools/zipalign" -f 4 "$out/tests-unaligned.apk" "$out/tests.apk"
-        "$buildtools/apksigner" sign --ks .local/signing/childgram-release.p12 \
-            --ks-key-alias childgram --ks-pass file:.local/signing/password.txt "$out/tests.apk"
+    "$buildtools/aapt2" link -I "$android" --manifest "$dir/AndroidManifest.xml" --min-sdk-version 26 --target-sdk-version 34 -o "$dir/tests-unaligned.apk"
+    jar uf "$dir/tests-unaligned.apk" -C "$dir/dex" classes.dex
+    "$buildtools/zipalign" -f 4 "$dir/tests-unaligned.apk" "$dir/tests.apk"
+    "$buildtools/apksigner" sign --ks .local/signing/childgram-release.p12 \
+        --ks-key-alias childgram --ks-pass file:.local/signing/password.txt "$dir/tests.apk"
+    local signer
+    signer=$("$buildtools/apksigner" verify --print-certs "$dir/tests.apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+    [[ "$signer" == "$(tr -d '[:space:]' < dev/release-certificate.sha256)" ]] || { echo 'Unexpected test APK signer.' >&2; exit 1; }
+}
+
+if [[ ${2:-} != parental ]]; then check_artifact; fi
+if [[ ${1:-} == --device ]]; then
+    build_instrumentation "$out/parental" org.childgram.releasewidgetchecks org.childgram.checks.ReleaseWidgetGateInstrumentation '' \
+        dev/tests/release/ReleaseWidgetGateInstrumentation.java
+    if [[ ${2:-} != parental ]]; then
+        classes=TMessagesProj/build/intermediates/runtime_library_classes_jar/release/bundleLibRuntimeToJarRelease/classes.jar
+        build_instrumentation "$out" org.childgram.releasechecks org.telegram.messenger.ChildgramReleaseInstrumentation "$classes" \
+            dev/tests/ChildgramReleaseInstrumentation.java dev/tests/ChildgramUsageStorageInstrumentation.java \
+            dev/tests/ChildgramUpdateInstrumentation.java
         # Same package/version, a deliberately different test-only signing key.
         if [[ ! -f "$out/fixture.keystore" ]]; then
             keytool -genkeypair -noprompt -keystore "$out/fixture.keystore" -storepass android \
@@ -93,9 +121,21 @@ EOF
         "$buildtools/zipalign" -f 4 "$out/fixture-unaligned.apk" "$out/wrong-signer.apk"
         "$buildtools/apksigner" sign --ks "$out/fixture.keystore" --ks-key-alias fixture --ks-pass pass:android "$out/wrong-signer.apk"
     fi
+fi
 CHECK
 
 if [[ "${1:-}" == --device ]]; then
+    out=.local/checks/release/parental
+    version_name=$(sed -n 's/^CHILDGRAM_VERSION_NAME=//p' gradle.properties)
+    version_code=$(sed -n 's/^CHILDGRAM_VERSION_CODE=//p' gradle.properties)
+    ./dev/emulator adb install -r "$out/tests.apk"
+    ./dev/emulator adb shell am instrument -w -e version_name "$version_name" -e version_code "$version_code" \
+        org.childgram.releasewidgetchecks/org.childgram.checks.ReleaseWidgetGateInstrumentation | tr -d '\r' | tee "$out/result.txt"
+    grep -Fxq 'INSTRUMENTATION_CODE: -1' "$out/result.txt"
+    grep -Fxq 'INSTRUMENTATION_RESULT: status=passed' "$out/result.txt"
+    grep -Fxq 'INSTRUMENTATION_RESULT: original_settings_restored=true' "$out/result.txt"
+    if [[ ${2:-} == parental ]]; then exit 0; fi
+
     ./dev/emulator adb install -r .local/checks/release/tests.apk
     ./dev/emulator adb shell mkdir -p /sdcard/Android/data/org.childgram/files/update-checks
     ./dev/emulator adb push .local/checks/release/wrong-signer.apk /sdcard/Android/data/org.childgram/files/update-checks/wrong-signer.apk
