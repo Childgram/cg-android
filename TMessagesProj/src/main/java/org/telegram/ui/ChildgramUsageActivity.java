@@ -39,6 +39,7 @@ public final class ChildgramUsageActivity extends UniversalFragment {
     private ZoneId zone = ZoneId.systemDefault();
     private ChildgramUsageStorage.Report report;
     private String selected;
+    private boolean selectedMedia;
     private LinearLayout navigation;
     private TextView previous, dateLabel, next;
     private HourChart chart;
@@ -148,7 +149,8 @@ public final class ChildgramUsageActivity extends UniversalFragment {
 
     private ChildgramUsageStorage.Entry selection() {
         if (report != null && selected != null) {
-            for (ChildgramUsageStorage.Entry entry : report.entries) if (selected.equals(entry.key)) return entry;
+            for (ChildgramUsageStorage.Entry entry : selectedMedia ? report.mediaEntries : report.entries)
+                if (selected.equals(entry.key)) return entry;
         }
         return null;
     }
@@ -166,22 +168,48 @@ public final class ChildgramUsageActivity extends UniversalFragment {
         ChildgramUsageStorage.Entry entry = selection();
         if (entry == null) selected = null;
         items.add(UItem.asButton(1, (selected == null ? "✓ " : "") + getString(R.string.ChildgramUsageTotal), duration(report.total)));
-        items.add(UItem.asHeader(entry == null ? getString(R.string.ChildgramUsageHourly) : label(entry)));
+        items.add(UItem.asShadow(getString(R.string.ChildgramUsageTotalInfo)));
+        items.add(UItem.asHeader(entry == null ? getString(R.string.ChildgramUsageHourly)
+                : (selectedMedia ? getString(R.string.ChildgramUsageMedia) + ": " : "") + label(entry)));
         items.add(UItem.asCustom(chart, 220));
-        items.add(UItem.asShadow(getString(R.string.ChildgramUsageVideo) + ": " + duration(entry == null ? report.video : entry.video)
+        String summary;
+        if (entry == null) {
+            summary = getString(R.string.ChildgramUsageForeground) + ": " + duration(report.foreground) + "\n"
+                    + videoSummary(report.video, report.fullscreen, report.pipInside, report.pipOutside);
+        } else if (selectedMedia) {
+            summary = videoSummary(entry.total, entry.fullscreen, entry.pipInside, entry.pipOutside);
+        } else {
+            summary = getString(R.string.ChildgramUsageFullscreen) + ": " + duration(entry.video);
+        }
+        items.add(UItem.asShadow(summary
                 + "\n" + zone.getId() + "\n" + getString(R.string.ChildgramUsageSelect)));
-        if (report.entries.isEmpty()) items.add(UItem.asShadow(getString(R.string.ChildgramUsageEmpty)));
+        if (report.entries.isEmpty() && report.mediaEntries.isEmpty()) items.add(UItem.asShadow(getString(R.string.ChildgramUsageEmpty)));
         else {
-            items.add(UItem.asHeader(getString(R.string.ChildgramUsageChats)));
+            if (!report.entries.isEmpty()) items.add(UItem.asHeader(getString(R.string.ChildgramUsageChats)));
             for (int i = 0; i < report.entries.size(); i++) {
                 ChildgramUsageStorage.Entry row = report.entries.get(i);
-                items.add(UItem.asButton(100 + i, (row.key.equals(selected) ? "✓ " : "") + label(row), duration(row.total)));
+                items.add(UItem.asButton(100 + i, (!selectedMedia && row.key.equals(selected) ? "✓ " : "") + label(row), duration(row.total)));
+            }
+            if (!report.mediaEntries.isEmpty()) {
+                items.add(UItem.asHeader(getString(R.string.ChildgramUsageMedia)));
+                items.add(UItem.asShadow(getString(R.string.ChildgramUsageMediaInfo)));
+                for (int i = 0; i < report.mediaEntries.size(); i++) {
+                    ChildgramUsageStorage.Entry row = report.mediaEntries.get(i);
+                    items.add(UItem.asButton(-100 - i, (selectedMedia && row.key.equals(selected) ? "✓ " : "") + label(row), duration(row.total)));
+                }
             }
         }
         if (report.fileSize > ChildgramUsageStorage.CLEANUP_THRESHOLD) {
             items.add(UItem.asShadow(AndroidUtilities.formatFileSize(report.fileSize)));
             items.add(UItem.asButton(2, getString(R.string.ChildgramUsageClear)).setEnabled(!clearing));
         }
+    }
+
+    private static String videoSummary(long total, long fullscreen, long inside, long outside) {
+        return getString(R.string.ChildgramUsageVideo) + ": " + duration(total)
+                + "\n" + getString(R.string.ChildgramUsageFullscreen) + ": " + duration(fullscreen)
+                + "\n" + getString(R.string.ChildgramUsagePipInside) + ": " + duration(inside)
+                + "\n" + getString(R.string.ChildgramUsagePipOutside) + ": " + duration(outside);
     }
 
     private String label(ChildgramUsageStorage.Entry entry) {
@@ -224,8 +252,16 @@ public final class ChildgramUsageActivity extends UniversalFragment {
                     }).create());
             return;
         }
-        if (item.id == 1) selected = null;
-        else if (report != null && item.id >= 100 && item.id - 100 < report.entries.size()) selected = report.entries.get(item.id - 100).key;
+        if (item.id == 1) {
+            selected = null;
+            selectedMedia = false;
+        } else if (report != null && item.id >= 100 && item.id - 100 < report.entries.size()) {
+            selected = report.entries.get(item.id - 100).key;
+            selectedMedia = false;
+        } else if (report != null && item.id <= -100 && -100 - item.id < report.mediaEntries.size()) {
+            selected = report.mediaEntries.get(-100 - item.id).key;
+            selectedMedia = true;
+        }
         else return;
         chart.selectedHour = -1;
         chart.invalidate();

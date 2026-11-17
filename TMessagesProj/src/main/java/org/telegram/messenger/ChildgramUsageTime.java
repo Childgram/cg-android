@@ -25,6 +25,18 @@ public final class ChildgramUsageTime {
         return Math.max(0, Math.min(end, rangeEnd) - Math.max(start, rangeStart));
     }
 
+    /** Intervals must arrive in start order. Returns the uncovered suffix length of each interval. */
+    public static final class Union {
+        private long coveredUntil = Long.MIN_VALUE;
+
+        public long add(long start, long end) {
+            if (end <= start) return 0;
+            long added = Math.max(0, end - Math.max(start, coveredUntil));
+            coveredUntil = Math.max(coveredUntil, end);
+            return added;
+        }
+    }
+
     public static long cleanupCutoff(LocalDate today, ZoneId zone) {
         return startOfDay(today.minusDays(7), zone);
     }

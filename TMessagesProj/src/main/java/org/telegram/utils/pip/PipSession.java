@@ -38,6 +38,12 @@ public final class PipSession {
         return state;
     }
 
+    /** Actual visible PiP, excluding entry transitions and a stashed system window. */
+    public boolean isVisibleForUsage() {
+        if (state == STATE_FLOATING) return floating != null && floating.isVisibleForUsage();
+        return state == STATE_SYSTEM && coordinator.isSystemVisibleForUsage(this);
+    }
+
     /** Shown in the host's floating window (not in a window of its own). */
     public boolean isFloating() {
         return floating != null && (state == STATE_FLOATING || state == STATE_SYSTEM && stateBeforeSystem == STATE_FLOATING);

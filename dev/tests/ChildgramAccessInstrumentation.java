@@ -50,6 +50,8 @@ public final class ChildgramAccessInstrumentation extends Instrumentation {
     private boolean verifyPrivacy;
     private boolean verifyUsage;
     private boolean verifyUsageUi;
+    private boolean verifyPip;
+    private String pipMode;
     private boolean usageOnly;
     private ChildgramUsageStorageInstrumentation.Result usageResult;
     private int exceptionCount = -1;
@@ -61,6 +63,8 @@ public final class ChildgramAccessInstrumentation extends Instrumentation {
         usageOnly = arguments != null && "true".equals(arguments.getString("usage_only"));
         verifyUsage = usageOnly || arguments != null && "true".equals(arguments.getString("verify_usage"));
         verifyUsageUi = arguments != null && "true".equals(arguments.getString("verify_usage_ui"));
+        verifyPip = arguments != null && "true".equals(arguments.getString("verify_pip"));
+        pipMode = arguments == null ? null : arguments.getString("pip_mode");
         start();
     }
 
@@ -78,6 +82,10 @@ public final class ChildgramAccessInstrumentation extends Instrumentation {
         });
         if (failure == null && verifyUsageUi) {
             try { checkUsageWindows(); }
+            catch (Throwable error) { failure = error instanceof AssertionError ? error.getMessage() : error.getClass().getSimpleName(); }
+        }
+        if (failure == null && verifyPip) {
+            try { assertions += ChildgramPipChecks.run(this, pipMode); }
             catch (Throwable error) { failure = error instanceof AssertionError ? error.getMessage() : error.getClass().getSimpleName(); }
         }
         if (failure == null && verifyUsage) {

@@ -17,6 +17,7 @@ import java.util.Map;
 /** Private, local usage history, separated by Telegram user ID rather than account slot. */
 public final class ChildgramUsageStorage {
     public static final long CLEANUP_THRESHOLD = 100_000_000L;
+    public static final int SCREEN = 0, PIP_INSIDE = 1, PIP_OUTSIDE = 2;
     private static final Map<Long, ChildgramUsageStorage> instances = new HashMap<>();
 
     public static synchronized ChildgramUsageStorage getInstance(long owner) {
@@ -30,15 +31,16 @@ public final class ChildgramUsageStorage {
 
     public static final class Entry {
         public String key, label;
-        public long total, video;
+        public long total, video, fullscreen, pipInside, pipOutside;
         public long[] hourlyTotal, hourlyVideo;
     }
 
     public static final class Report {
         public final List<Entry> entries = new ArrayList<>();
+        public final List<Entry> mediaEntries = new ArrayList<>();
         public List<ChildgramUsageTime.Hour> hours;
         public long[] hourlyTotal, hourlyVideo;
-        public long total, video, firstUtc, fileSize;
+        public long total, video, foreground, fullscreen, pipInside, pipOutside, firstUtc, fileSize;
         public boolean failed;
     }
 
@@ -52,14 +54,36 @@ public final class ChildgramUsageStorage {
 
     private SQLiteDatabase db() {
         if (database == null) {
-            database = SQLiteDatabase.openOrCreateDatabase(file, null);
-            database.execSQL("CREATE TABLE IF NOT EXISTS intervals (id TEXT PRIMARY KEY, screen TEXT NOT NULL, label TEXT NOT NULL, start_utc INTEGER NOT NULL, end_utc INTEGER NOT NULL, video INTEGER NOT NULL)");
-            database.execSQL("CREATE INDEX IF NOT EXISTS intervals_end ON intervals(end_utc)");
+            SQLiteDatabase opened = SQLiteDatabase.openOrCreateDatabase(file, null);
+            try {
+                opened.beginTransaction();
+                try {
+                    opened.execSQL("CREATE TABLE IF NOT EXISTS intervals (id TEXT PRIMARY KEY, screen TEXT NOT NULL, label TEXT NOT NULL, start_utc INTEGER NOT NULL, end_utc INTEGER NOT NULL, video INTEGER NOT NULL, kind INTEGER NOT NULL DEFAULT 0)");
+                    boolean hasKind = false;
+                    try (Cursor columns = opened.rawQuery("PRAGMA table_info(intervals)", null)) {
+                        while (columns.moveToNext()) hasKind |= "kind".equals(columns.getString(columns.getColumnIndexOrThrow("name")));
+                    }
+                    if (!hasKind) opened.execSQL("ALTER TABLE intervals ADD COLUMN kind INTEGER NOT NULL DEFAULT 0");
+                    opened.execSQL("CREATE INDEX IF NOT EXISTS intervals_end ON intervals(end_utc)");
+                    opened.setTransactionSuccessful();
+                } finally {
+                    opened.endTransaction();
+                }
+                database = opened;
+            } catch (RuntimeException error) {
+                opened.close();
+                throw error;
+            }
         }
         return database;
     }
 
     public void save(String id, String screen, String label, long start, long end, boolean video) {
+        save(id, screen, label, start, end, video, SCREEN);
+    }
+
+    public void save(String id, String screen, String label, long start, long end, boolean video, int kind) {
+        if (kind < SCREEN || kind > PIP_OUTSIDE) throw new IllegalArgumentException("Unknown usage interval kind");
         if (end <= start) return;
         queue.postRunnable(() -> {
             try {
@@ -70,6 +94,7 @@ public final class ChildgramUsageStorage {
                 values.put("start_utc", start);
                 values.put("end_utc", end);
                 values.put("video", video ? 1 : 0);
+                values.put("kind", kind);
                 if (db().insertWithOnConflict("intervals", null, values, SQLiteDatabase.CONFLICT_REPLACE) < 0) {
                     throw new IllegalStateException("Could not persist Childgram usage interval");
                 }
@@ -83,41 +108,39 @@ public final class ChildgramUsageStorage {
         queue.postRunnable(() -> {
             Report result = new Report();
             result.hours = ChildgramUsageTime.hours(date, zone);
-            result.hourlyTotal = new long[result.hours.size()];
-            result.hourlyVideo = new long[result.hours.size()];
+            Totals all = new Totals(null, result.hours);
+            result.hourlyTotal = all.entry.hourlyTotal;
+            result.hourlyVideo = all.entry.hourlyVideo;
+            ChildgramUsageTime.Union foreground = new ChildgramUsageTime.Union();
             long start = ChildgramUsageTime.startOfDay(date, zone);
             long end = ChildgramUsageTime.startOfDay(date.plusDays(1), zone);
             try {
-                LinkedHashMap<String, Entry> entries = new LinkedHashMap<>();
-                try (Cursor cursor = db().rawQuery("SELECT screen,label,start_utc,end_utc,video FROM intervals WHERE end_utc>? AND start_utc<? ORDER BY start_utc", new String[]{Long.toString(start), Long.toString(end)})) {
+                LinkedHashMap<String, Totals> entries = new LinkedHashMap<>(), mediaEntries = new LinkedHashMap<>();
+                try (Cursor cursor = db().rawQuery("SELECT screen,label,start_utc,end_utc,video,kind FROM intervals WHERE end_utc>? AND start_utc<? ORDER BY start_utc", new String[]{Long.toString(start), Long.toString(end)})) {
                     while (cursor.moveToNext()) {
                         String key = cursor.getString(0);
-                        Entry entry = entries.get(key);
-                        if (entry == null) {
-                            entry = new Entry();
-                            entry.key = key;
-                            entry.hourlyTotal = new long[result.hours.size()];
-                            entry.hourlyVideo = new long[result.hours.size()];
-                            entries.put(key, entry);
-                        }
-                        entry.label = cursor.getString(1);
-                        long intervalStart = cursor.getLong(2), intervalEnd = cursor.getLong(3);
+                        String label = cursor.getString(1);
+                        long intervalStart = Math.max(start, cursor.getLong(2)), intervalEnd = Math.min(end, cursor.getLong(3));
                         boolean video = cursor.getInt(4) != 0;
-                        long duration = ChildgramUsageTime.overlap(intervalStart, intervalEnd, start, end);
-                        entry.total += duration;
-                        result.total += duration;
-                        if (video) { entry.video += duration; result.video += duration; }
-                        for (int h = 0; h < result.hours.size(); h++) {
-                            ChildgramUsageTime.Hour hour = result.hours.get(h);
-                            long part = ChildgramUsageTime.overlap(intervalStart, intervalEnd, hour.start, hour.end);
-                            entry.hourlyTotal[h] += part;
-                            result.hourlyTotal[h] += part;
-                            if (video) { entry.hourlyVideo[h] += part; result.hourlyVideo[h] += part; }
+                        int kind = cursor.getInt(5);
+                        all.add(label, intervalStart, intervalEnd, video, kind);
+                        if (kind == SCREEN) {
+                            result.foreground += foreground.add(intervalStart, intervalEnd);
+                            entries.computeIfAbsent(key, k -> new Totals(k, result.hours)).add(label, intervalStart, intervalEnd, video, kind);
                         }
+                        if (video || kind != SCREEN)
+                            mediaEntries.computeIfAbsent(key, k -> new Totals(k, result.hours)).add(label, intervalStart, intervalEnd, true, kind);
                     }
                 }
-                result.entries.addAll(entries.values());
+                result.total = all.entry.total;
+                result.video = all.entry.video;
+                result.fullscreen = all.entry.fullscreen;
+                result.pipInside = all.entry.pipInside;
+                result.pipOutside = all.entry.pipOutside;
+                for (Totals totals : entries.values()) result.entries.add(totals.entry);
+                for (Totals totals : mediaEntries.values()) result.mediaEntries.add(totals.entry);
                 Collections.sort(result.entries, (a, b) -> Long.compare(b.total, a.total));
+                Collections.sort(result.mediaEntries, (a, b) -> Long.compare(b.total, a.total));
                 try (Cursor cursor = db().rawQuery("SELECT MIN(start_utc) FROM intervals", null)) {
                     if (cursor.moveToFirst() && !cursor.isNull(0)) result.firstUtc = cursor.getLong(0);
                 }
@@ -128,6 +151,45 @@ public final class ChildgramUsageStorage {
             }
             AndroidUtilities.runOnUIThread(() -> callback.run(result));
         });
+    }
+
+    /** SQL supplies start-ordered rows, so only the uncovered tail contributes to each union. */
+    private static final class Totals {
+        final Entry entry = new Entry();
+        final List<ChildgramUsageTime.Hour> hours;
+        final ChildgramUsageTime.Union total = new ChildgramUsageTime.Union(), video = new ChildgramUsageTime.Union();
+        final ChildgramUsageTime.Union[] modes = {new ChildgramUsageTime.Union(), new ChildgramUsageTime.Union(), new ChildgramUsageTime.Union()};
+
+        Totals(String key, List<ChildgramUsageTime.Hour> hours) {
+            entry.key = key;
+            this.hours = hours;
+            entry.hourlyTotal = new long[hours.size()];
+            entry.hourlyVideo = new long[hours.size()];
+        }
+
+        void add(String label, long start, long end, boolean hasVideo, int kind) {
+            entry.label = label;
+            long added = total.add(start, end);
+            entry.total += added;
+            addHours(entry.hourlyTotal, end - added, end);
+            if (hasVideo || kind != SCREEN) {
+                added = video.add(start, end);
+                entry.video += added;
+                addHours(entry.hourlyVideo, end - added, end);
+                added = modes[kind].add(start, end);
+                if (kind == SCREEN) entry.fullscreen += added;
+                else if (kind == PIP_INSIDE) entry.pipInside += added;
+                else entry.pipOutside += added;
+            }
+        }
+
+        private void addHours(long[] values, long start, long end) {
+            if (end <= start) return;
+            for (int h = 0; h < hours.size(); h++) {
+                ChildgramUsageTime.Hour hour = hours.get(h);
+                values[h] += ChildgramUsageTime.overlap(start, end, hour.start, hour.end);
+            }
+        }
     }
 
     public void prune(long cutoff, PruneCallback callback) {

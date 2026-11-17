@@ -18877,6 +18877,30 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                 && videoPlayer.player.isPlaying();
     }
 
+    /** A floating viewer is separate from Instance; system PiP keeps the primary instance. */
+    public static MessageObject getChildgramPipVideoMessage() {
+        MessageObject message = PipInstance == null ? null : PipInstance.childgramPipVideoMessage();
+        return message != null ? message : Instance == null ? null : Instance.childgramPipVideoMessage();
+    }
+
+    /** Keep usage polling while PiP exists, including pause, buffering, screen lock and stashing. */
+    public static boolean hasChildgramPipVideo() {
+        return PipInstance != null && PipInstance.hasChildgramPipVideoSession()
+                || Instance != null && Instance.hasChildgramPipVideoSession();
+    }
+
+    private boolean hasChildgramPipVideoSession() {
+        return parentActivity != null && !parentActivity.isDestroyed() && pipSession != null
+                && (pipSession.getState() == PipSession.STATE_FLOATING || pipSession.getState() == PipSession.STATE_SYSTEM)
+                && currentMessageObject != null && currentMessageObject.isVideo() && !currentMessageObject.isRoundVideo()
+                && videoPlayer != null && videoPlayer.player != null;
+    }
+
+    private MessageObject childgramPipVideoMessage() {
+        return hasChildgramPipVideoSession() && pipSession.isVisibleForUsage() && videoPlayer.player.isPlaying()
+                ? currentMessageObject : null;
+    }
+
     private int getVideoFitHeight() {
         int height = getContainerViewHeight();
         if (containerView != null) {

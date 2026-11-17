@@ -83,6 +83,7 @@ final class FloatingHost {
     private final WindowManager.LayoutParams windowLayoutParams = new WindowManager.LayoutParams();
     private boolean isOverlay;
     private boolean isWindowAdded;
+    private final RectF usageRect = new RectF();
 
     private ViewGroup contentView;
     private FrameLayout contentFrameLayout;
@@ -149,6 +150,15 @@ final class FloatingHost {
 
     boolean isOverlay() {
         return isOverlay;
+    }
+
+    boolean isVisibleForUsage() {
+        if (!isWindowAdded || isDismissing || contentView == null || !contentView.isAttachedToWindow()
+                || !contentView.isShown() || contentView.getWindowVisibility() != View.VISIBLE || contentView.getAlpha() <= 0
+                || !isOverlay && !session.coordinator.isActivityResumed()) return false;
+        getRect(usageRect);
+        return usageRect.right > 0 && usageRect.bottom > 0
+                && usageRect.left < AndroidUtilities.displaySize.x && usageRect.top < AndroidUtilities.displaySize.y;
     }
 
     boolean hasFloatingView() {

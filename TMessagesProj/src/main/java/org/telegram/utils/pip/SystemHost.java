@@ -48,6 +48,7 @@ final class SystemHost {
     private @Nullable PipTextureView activeTarget;
     private @Nullable View activeSystemView;
     private boolean isInPip;
+    private boolean isStashed;
     private boolean isOwner;
 
     private @Nullable MediaSession mediaSession;
@@ -95,6 +96,13 @@ final class SystemHost {
 
     boolean isOwner() {
         return isOwner;
+    }
+
+    boolean isVisibleForUsage(PipSession session) {
+        return active == session && isInPip && !entering && !isStashed && activity != null
+                && !activity.isFinishing() && !activity.isDestroyed()
+                && AndroidUtilities.isInPictureInPictureMode(activity)
+                && layout != null && layout.isAttachedToWindow() && layout.isShown() && layout.getWindowVisibility() == View.VISIBLE;
     }
 
     /* Params */
@@ -399,6 +407,9 @@ final class SystemHost {
     }
 
     void onPictureInPictureUiStateChanged(@NonNull Object state) {
+        if (Build.VERSION.SDK_INT >= 31 && state instanceof PictureInPictureUiState) {
+            isStashed = ((PictureInPictureUiState) state).isStashed();
+        }
         if (Build.VERSION.SDK_INT >= 35 && state instanceof PictureInPictureUiState) {
             if (((PictureInPictureUiState) state).isTransitioningToPip() && active == null && candidate != null) {
                 startEnter(candidate);
@@ -439,6 +450,7 @@ final class SystemHost {
         active = session;
         candidate = null;
         entering = true;
+        isStashed = false;
         session.stateBeforeSystem = session.state;
 
         final View systemView = session.floating == null ? session.content.createSystemView(activity) : null;

@@ -10,6 +10,7 @@ import androidx.annotation.Nullable;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
+import org.telegram.messenger.ChildgramUsageTracker;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.utils.WindowVisibilityManager;
 
@@ -76,6 +77,14 @@ public final class PipCoordinator {
         return activityStarted;
     }
 
+    boolean isActivityResumed() {
+        return activityResumed && activity != null && !AndroidUtilities.isInPictureInPictureMode(activity);
+    }
+
+    boolean isSystemVisibleForUsage(PipSession session) {
+        return systemHost.isVisibleForUsage(session);
+    }
+
     void dismissOtherFloating(PipSession except) {
         for (int i = sessions.size() - 1; i >= 0; i--) {
             final PipSession session = sessions.get(i);
@@ -94,7 +103,9 @@ public final class PipCoordinator {
     }
 
     boolean enterSystemPip(PipSession session) {
-        return systemHost.enterNow(session);
+        boolean entered = systemHost.enterNow(session);
+        ChildgramUsageTracker.refreshVisibleScreen();
+        return entered;
     }
 
     public static boolean canEnterSystemPip() {
@@ -103,6 +114,7 @@ public final class PipCoordinator {
 
     void invalidateSystem() {
         systemHost.update();
+        ChildgramUsageTracker.refreshVisibleScreen();
     }
 
     void runWhenAppResumed(Runnable action) {
@@ -227,18 +239,21 @@ public final class PipCoordinator {
 
     public void onUserLeaveHint() {
         systemHost.onUserLeaveHint();
+        ChildgramUsageTracker.refreshVisibleScreen();
     }
 
     public void onPictureInPictureRequested() {
-        systemHost.onUserLeaveHint();
+        onUserLeaveHint();
     }
 
     public void onPictureInPictureModeChanged(boolean isInPictureInPictureMode) {
         systemHost.onPictureInPictureModeChanged(isInPictureInPictureMode);
+        ChildgramUsageTracker.refreshVisibleScreen();
     }
 
     public void onPictureInPictureUiStateChanged(@NonNull Object pipState) {
         systemHost.onPictureInPictureUiStateChanged(pipState);
+        ChildgramUsageTracker.refreshVisibleScreen();
     }
 
     public void onConfigurationChanged(@NonNull Configuration newConfig) {

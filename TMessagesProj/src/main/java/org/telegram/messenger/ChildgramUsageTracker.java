@@ -1,6 +1,8 @@
 package org.telegram.messenger;
 
 import android.app.Activity;
+import android.app.KeyguardManager;
+import android.content.Context;
 import android.graphics.Rect;
 import android.os.SystemClock;
 import android.view.View;
@@ -73,7 +75,7 @@ import java.util.IdentityHashMap;
 import java.util.Set;
 import java.util.UUID;
 
-/** One foreground interval at a time; full-screen video is a subset of that interval. */
+/** One screen interval plus independently attributed PiP playback, without adding overlap to screen time. */
 public final class ChildgramUsageTracker {
     private static final Set<Activity> resumedActivities = Collections.newSetFromMap(new IdentityHashMap<>());
     private static final ArrayList<BottomSheet> visibleSheets = new ArrayList<>();
@@ -81,34 +83,27 @@ public final class ChildgramUsageTracker {
     private static boolean foreground;
     private static boolean refreshPending;
     private static Session session;
-    private static long lastSaveElapsed;
+    private static Session pipSession;
     private static final Runnable refresh = () -> {
         refreshPending = false;
         update();
     };
-    private static final Runnable tick = new Runnable() {
-        @Override public void run() {
-            update();
-            if (foreground) AndroidUtilities.runOnUIThread(this, 1000);
-        }
-    };
+    private static final Runnable tick = ChildgramUsageTracker::update;
 
     private ChildgramUsageTracker() {}
 
     private static final class Session {
         String id, key, label;
-        long owner, utc, elapsed;
+        long owner, utc, elapsed, lastSaveElapsed;
         boolean video;
+        int kind;
     }
 
     public static void onForeground(Activity source, boolean active) {
         if (!BuildVars.CHILDGRAM) return;
         if (active && !source.isFinishing() && !source.isDestroyed()) resumedActivities.add(source);
         else resumedActivities.remove(source);
-        foreground = !resumedActivities.isEmpty();
-        AndroidUtilities.cancelRunOnUIThread(tick);
         update();
-        if (foreground) AndroidUtilities.runOnUIThread(tick, 1000);
     }
 
     /** Coalesce nested fragment lifecycle events until the navigation stack has settled. */
@@ -129,49 +124,92 @@ public final class ChildgramUsageTracker {
     public static void flush() {
         if (!BuildVars.CHILDGRAM) return;
         update();
-        save(SystemClock.elapsedRealtime());
+        long elapsed = SystemClock.elapsedRealtime();
+        save(session, elapsed);
+        save(pipSession, elapsed);
     }
 
     /** Start a fresh row before pruning so a later checkpoint cannot restore an old interval. */
     public static void splitForCleanup() {
         if (!BuildVars.CHILDGRAM) return;
-        save(SystemClock.elapsedRealtime());
+        long elapsed = SystemClock.elapsedRealtime();
+        save(session, elapsed);
+        save(pipSession, elapsed);
         session = null;
+        pipSession = null;
         update();
     }
 
     private static void update() {
         if (!BuildVars.CHILDGRAM) return;
+        foreground = false;
+        for (Activity activity : resumedActivities) {
+            if (!activity.isFinishing() && !activity.isDestroyed()
+                    && !AndroidUtilities.isInPictureInPictureMode(activity)) {
+                foreground = true;
+                break;
+            }
+        }
         long elapsed = SystemClock.elapsedRealtime();
         long utc = System.currentTimeMillis();
-        Session target = currentScreen();
+        session = updateSession(session, currentScreen(), utc, elapsed);
+        pipSession = updateSession(pipSession, currentPip(), utc, elapsed);
+        AndroidUtilities.cancelRunOnUIThread(tick);
+        // Paused/hidden PiP still needs to notice screen unlock and the next visible playback.
+        if (foreground || PhotoViewer.hasChildgramPipVideo()) AndroidUtilities.runOnUIThread(tick, 1000);
+    }
+
+    private static Session updateSession(Session session, Session target, long utc, long elapsed) {
         boolean same = session != null && target != null && session.owner == target.owner
-                && session.key.equals(target.key) && session.video == target.video;
+                && session.key.equals(target.key) && session.video == target.video && session.kind == target.kind;
         // A wall-clock correction changes placement on the timeline, never the measured duration.
         boolean clockChanged = session != null && Math.abs(utc - (session.utc + elapsed - session.elapsed)) > 2000;
         if (!same || clockChanged) {
-            save(elapsed);
+            save(session, elapsed);
             session = target;
             if (session != null) {
                 session.id = UUID.randomUUID().toString();
                 session.utc = utc;
                 session.elapsed = elapsed;
-                lastSaveElapsed = elapsed;
+                session.lastSaveElapsed = elapsed;
             }
-        } else if (elapsed - lastSaveElapsed >= 10000) {
-            save(elapsed);
+        } else if (elapsed - session.lastSaveElapsed >= 10000) {
+            save(session, elapsed);
         }
+        return session;
     }
 
-    private static void save(long elapsed) {
+    private static void save(Session session, long elapsed) {
         if (session == null) return;
         ChildgramUsageStorage.getInstance(session.owner).save(session.id, session.key, session.label,
-                session.utc, session.utc + Math.max(0, elapsed - session.elapsed), session.video);
-        lastSaveElapsed = elapsed;
+                session.utc, session.utc + Math.max(0, elapsed - session.elapsed), session.video, session.kind);
+        session.lastSaveElapsed = elapsed;
+    }
+
+    private static boolean isScreenAvailable() {
+        if (!ApplicationLoader.isScreenOn || SharedConfig.appLocked || SharedConfig.isWaitingForPasscodeEnter) return false;
+        KeyguardManager keyguard = (KeyguardManager) ApplicationLoader.applicationContext.getSystemService(Context.KEYGUARD_SERVICE);
+        return keyguard == null || !keyguard.isKeyguardLocked();
+    }
+
+    private static Session currentPip() {
+        if (!isScreenAvailable()) return null;
+        MessageObject video = PhotoViewer.getChildgramPipVideoMessage();
+        if (video == null) return null;
+        long owner = UserConfig.getInstance(video.currentAccount).getClientUserId();
+        long dialogId = video.getDialogId();
+        if (owner == 0 || dialogId == 0) return null;
+        Session target = new Session();
+        target.owner = owner;
+        target.key = "chat:" + dialogId;
+        target.label = dialogName(video.currentAccount, dialogId);
+        target.video = true;
+        target.kind = foreground ? ChildgramUsageStorage.PIP_INSIDE : ChildgramUsageStorage.PIP_OUTSIDE;
+        return target;
     }
 
     private static Session currentScreen() {
-        if (!foreground || !ApplicationLoader.isScreenOn || SharedConfig.appLocked || SharedConfig.isWaitingForPasscodeEnter) return null;
+        if (!foreground || !isScreenAvailable()) return null;
         BaseFragment fragment = visibleFragment();
         if (fragment == null || fragment.isPaused()) return null;
         Activity activity = fragment.getParentActivity();

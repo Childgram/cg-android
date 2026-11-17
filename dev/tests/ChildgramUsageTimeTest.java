@@ -24,6 +24,22 @@ public final class ChildgramUsageTimeTest {
     }
 
     public static void main(String[] args) {
+        ChildgramUsageTime.Union union = new ChildgramUsageTime.Union();
+        long minute = 60_000;
+        long total = union.add(0, 20 * minute);
+        total += union.add(10 * minute, 20 * minute);
+        total += union.add(12 * minute, 14 * minute);
+        total += union.add(20 * minute, 30 * minute);
+        check(total == 30 * minute, "Screen plus overlapping inside PiP plus outside PiP counts 30, not 40 minutes");
+        check(union.add(30 * minute, 30 * minute) == 0, "Empty intervals add no time");
+        check(union.add(40 * minute, 45 * minute) == 5 * minute, "Union does not count gaps");
+        ChildgramUsageTime.Union sameStart = new ChildgramUsageTime.Union();
+        check(sameStart.add(-10, 10) + sameStart.add(-10, 20) + sameStart.add(0, 5) == 30,
+                "Equal starts, negative timestamps and nested intervals preserve the union");
+        ChildgramUsageTime.Union shorterEnd = new ChildgramUsageTime.Union();
+        check(shorterEnd.add(0, 20) + shorterEnd.add(0, 5) + shorterEnd.add(10, 15) + shorterEnd.add(15, 30) == 30,
+                "Equal starts and decreasing ends never lose the covered tail");
+
         ZoneId zone = ZoneId.of("Europe/Podgorica");
         List<ChildgramUsageTime.Hour> spring = ChildgramUsageTime.hours(LocalDate.of(2026, 3, 29), zone);
         check(spring.size() == 23 && length(spring) == 23 * HOUR, "Spring day has 23 hours");
