@@ -6920,7 +6920,6 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
 
     @Override
     protected void onPause() {
-        org.telegram.messenger.ChildgramUsageTracker.onForeground(this, false);
         super.onPause();
         isResumed = false;
         WidgetMedia.onAppPaused(true);
@@ -7118,7 +7117,6 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
 
     @Override
     protected void onDestroy() {
-        org.telegram.messenger.ChildgramUsageTracker.onForeground(this, false);
         GramWalletStorageAuth.onActivityDestroyed(this);
         PipCoordinator.getInstance().onActivityDestroy(this);
         isActive = false;
@@ -7238,7 +7236,6 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         WidgetMedia.onAppPaused(false);
         isResumed = true;
         AndroidUtilities.runOnUIThread(this::showChildgramParentalSetup);
-        AndroidUtilities.runOnUIThread(() -> org.telegram.messenger.ChildgramUsageTracker.onForeground(this, isResumed));
         PipCoordinator.getInstance().onActivityResume(this);
         if (onResumeStaticCallback != null) {
             onResumeStaticCallback.run();

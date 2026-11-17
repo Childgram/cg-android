@@ -350,6 +350,24 @@ public class ApplicationLoader extends Application {
                     ensureCurrentNetworkGet(true);
                 }
             }
+
+            @Override
+            public void onActivityResumed(Activity activity) {
+                super.onActivityResumed(activity);
+                ChildgramUsageTracker.onActivityVisibilityChanged(activity, true);
+            }
+
+            @Override
+            public void onActivityPaused(Activity activity) {
+                super.onActivityPaused(activity);
+                ChildgramUsageTracker.onActivityVisibilityChanged(activity, false);
+            }
+
+            @Override
+            public void onActivityDestroyed(Activity activity) {
+                super.onActivityDestroyed(activity);
+                ChildgramUsageTracker.onActivityVisibilityChanged(activity, false);
+            }
         };
         if (BuildVars.CHILDGRAM) {
             ForegroundDetector.getInstance().addListener(new ForegroundDetector.Listener() {

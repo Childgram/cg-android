@@ -99,11 +99,16 @@ public final class ChildgramUsageTracker {
         int kind;
     }
 
-    public static void onForeground(Activity source, boolean active) {
-        if (!BuildVars.CHILDGRAM) return;
-        if (active && !source.isFinishing() && !source.isDestroyed()) resumedActivities.add(source);
-        else resumedActivities.remove(source);
-        update();
+    static void onActivityVisibilityChanged(Activity activity, boolean resumed) {
+        if (!BuildVars.CHILDGRAM || !(activity instanceof LaunchActivity || activity instanceof BubbleActivity)) return;
+        if (resumed && !activity.isFinishing() && !activity.isDestroyed()) {
+            resumedActivities.add(activity);
+            // The detector runs inside super.onResume(), before Telegram restores its chat.
+            refreshVisibleScreen();
+        } else {
+            resumedActivities.remove(activity);
+            update();
+        }
     }
 
     /** Coalesce nested fragment lifecycle events until the navigation stack has settled. */
