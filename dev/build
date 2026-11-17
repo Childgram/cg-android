@@ -50,7 +50,9 @@ if [[ $# == 0 ]]; then
     else set -- :TMessagesProj_App:assembleAfatDebug; fi
 fi
 
-if git submodule status --recursive | LC_ALL=C grep '^[+-U]' >/dev/null; then
+# QuickJS explicitly skips test262 (update=none); it is not an Android build input.
+if git submodule status --recursive | LC_ALL=C grep '^[+-U]' | LC_ALL=C grep -vE \
+    '^-[0-9a-f]{40} TMessagesProj/jni/twidget/widget-sandbox/packages/ios/Sources/CQuickJS/quickjs/test262$' >/dev/null; then
     echo 'Submodules are incomplete or differ from upstream. Run:' >&2
     echo 'git submodule update --init --recursive --depth=1' >&2
     exit 1
