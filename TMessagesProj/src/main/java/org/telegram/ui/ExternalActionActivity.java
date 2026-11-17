@@ -415,7 +415,7 @@ public class ExternalActionActivity extends Activity implements INavigationLayou
             return;
         }
         ConnectionsManager.getInstance(UserConfig.selectedAccount).setAppPaused(true, false);
-        UserConfig.selectedAccount = account;
+        UserConfig.setSelectedAccount(account);
         UserConfig.getInstance(0).saveConfig(false);
         if (!ApplicationLoader.mainInterfacePaused) {
             ConnectionsManager.getInstance(UserConfig.selectedAccount).setAppPaused(false, false);

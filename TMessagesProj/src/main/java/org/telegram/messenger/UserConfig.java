@@ -25,6 +25,20 @@ import java.util.Arrays;
 public class UserConfig extends BaseController {
 
     public static int selectedAccount;
+    // A pending window belongs to one selection, even if the user switches back to the same account.
+    private static volatile int accountSelectionVersion;
+
+    public static int getAccountSelectionVersion() {
+        return accountSelectionVersion;
+    }
+
+    public static synchronized void setSelectedAccount(int account) {
+        if (selectedAccount != account) {
+            selectedAccount = account;
+            accountSelectionVersion++;
+        }
+    }
+
     public final static int MAX_ACCOUNT_DEFAULT_COUNT = 3;
     public final static int MAX_ACCOUNT_COUNT = 4;
 
@@ -296,7 +310,7 @@ public class UserConfig extends BaseController {
             }
             SharedPreferences preferences = getPreferences();
             if (currentAccount == 0) {
-                selectedAccount = preferences.getInt("selectedAccount", 0);
+                setSelectedAccount(preferences.getInt("selectedAccount", 0));
             }
             registeredForPush = preferences.getBoolean("registeredForPush", false);
             lastSendMessageId = preferences.getInt("lastSendMessageId", -210000);

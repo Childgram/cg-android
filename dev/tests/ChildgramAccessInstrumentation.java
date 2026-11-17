@@ -8,6 +8,7 @@ import android.content.Intent;
 import android.graphics.Rect;
 import android.os.Bundle;
 import android.os.SystemClock;
+import android.view.View;
 import android.widget.TextView;
 
 import org.telegram.tgnet.TLRPC;
@@ -16,6 +17,7 @@ import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.tl.TL_account;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.BottomSheet;
+import org.telegram.ui.ActionBar.BottomSheetTabsOverlay;
 import org.telegram.ui.CallLogActivity;
 import org.telegram.ui.ChatActivity;
 import org.telegram.ui.ChildgramParentalActivity;
@@ -28,6 +30,9 @@ import org.telegram.ui.PhotoViewer;
 import org.telegram.ui.ProfileActivity;
 import org.telegram.ui.SettingsActivity;
 import org.telegram.ui.Stars.CraftGiftSheet;
+import org.telegram.ui.bots.BotWebViewAttachedSheet;
+import org.telegram.ui.bots.BotWebViewSheet;
+import org.telegram.ui.bots.WebViewRequestProps;
 import org.telegram.messenger.browser.Browser;
 import org.telegram.utils.pip.PipContent;
 import org.telegram.utils.pip.PipCoordinator;
@@ -40,6 +45,7 @@ import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -87,6 +93,10 @@ public final class ChildgramAccessInstrumentation extends Instrumentation {
         }
         if (failure == null && verifyUsageUi) {
             try { checkUsageWindows(); }
+            catch (Throwable error) { failure = error instanceof AssertionError ? error.getMessage() : error.getClass().getSimpleName(); }
+        }
+        if (failure == null && !usageOnly) {
+            try { checkWebViewWindows(); }
             catch (Throwable error) { failure = error instanceof AssertionError ? error.getMessage() : error.getClass().getSimpleName(); }
         }
         if (failure == null && verifyPip) {
@@ -186,6 +196,106 @@ public final class ChildgramAccessInstrumentation extends Instrumentation {
         runOnMainSync(() -> {});
         expect("resolver errors pass through and only the uncancelled original peer opens once",
                 opened.equals(Arrays.asList(null, Long.MAX_VALUE, id)));
+    }
+
+    private enum WebViewAction { OPEN, DISMISS, RELEASE, SWITCH, DISMISS_AND_SWITCH, SWITCH_BACK }
+
+    private void checkWebViewWindows() throws Exception {
+        if (LaunchActivity.instance == null) {
+            startActivitySync(new Intent(getTargetContext(), LaunchActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        }
+        Method currentFragment = LaunchActivity.class.getDeclaredMethod("getSafeLastFragment");
+        BaseFragment[] source = new BaseFragment[1];
+        awaitUi("mini app has a foreground source", () -> {
+            source[0] = (BaseFragment) currentFragment.invoke(null);
+            return !ApplicationLoader.mainInterfacePaused && source[0] != null && source[0].getLayoutContainer() != null;
+        });
+        for (boolean attached : new boolean[] {false, true}) {
+            for (WebViewAction action : WebViewAction.values()) {
+                checkWebViewWindow(source[0], attached, action);
+            }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void checkWebViewWindow(BaseFragment source, boolean attached, WebViewAction action) throws Exception {
+        int account = UserConfig.selectedAccount;
+        int other = (account + 1) % UserConfig.MAX_ACCOUNT_COUNT;
+        String label = (attached ? "attached " : "dialog ") + action;
+        BottomSheetTabsOverlay.Sheet[] sheet = new BottomSheetTabsOverlay.Sheet[1];
+        int[] showCalls = {0};
+        WebViewRequestProps props = new WebViewRequestProps();
+        TLRPC.User bot = new TLRPC.TL_user();
+        bot.id = 8_300_000_000_000L + (System.nanoTime() & 0xfffffff);
+        bot.first_name = "Web view fixture";
+        bot.bot = true;
+        ChildgramAccess policy = ChildgramAccess.getInstance(account);
+        Map<Long, Long> grants = (Map<Long, Long>) fieldValue(policy, "botChecks");
+        try {
+            onMainChecked(() -> {
+                Activity activity = source.getParentActivity();
+                MessagesController.getInstance(account).putUser(bot, true);
+                expect(label + " starts without permission", !policy.isAllowed(bot.id));
+                props.currentAccount = account;
+                props.botId = props.peerId = bot.id;
+                props.applyResponse(new TLRPC.TL_webViewResultUrl()); // No remote URL or session to poll.
+                if (attached) {
+                    sheet[0] = new BotWebViewAttachedSheet(source) {
+                        @Override public void show() { showCalls[0]++; super.show(); }
+                    };
+                } else {
+                    sheet[0] = new BotWebViewSheet(activity, source.getResourceProvider()) {
+                        @Override public void show() { showCalls[0]++; super.show(); }
+                    };
+                }
+                View view = (View) sheet[0].getWindowView();
+                if (!attached) ((BotWebViewSheet) sheet[0]).setParentActivity(activity);
+                requestWebView(sheet[0], source, props);
+                sheet[0].show();
+                expect(label + " waits for access", !view.isAttachedToWindow() && showCalls[0] == 1);
+                if (action == WebViewAction.DISMISS || action == WebViewAction.DISMISS_AND_SWITCH) sheet[0].dismiss(false);
+                if (action == WebViewAction.RELEASE) sheet[0].release();
+                if (action == WebViewAction.SWITCH || action == WebViewAction.DISMISS_AND_SWITCH || action == WebViewAction.SWITCH_BACK) {
+                    UserConfig.setSelectedAccount(other);
+                    if (action == WebViewAction.SWITCH_BACK) UserConfig.setSelectedAccount(account);
+                }
+                // The real posted check sees the same in-memory grant as a successful bot permission response.
+                grants.put(bot.id, SystemClock.elapsedRealtime());
+            });
+            waitForIdleSync();
+            if (action == WebViewAction.OPEN) {
+                awaitUi(label + " appears", () -> ((View) sheet[0].getWindowView()).isAttachedToWindow());
+            }
+            onMainChecked(() -> {
+                View view = (View) sheet[0].getWindowView();
+                expect(label + " received a valid grant", policy.isAllowed(bot.id));
+                boolean open = action == WebViewAction.OPEN;
+                expect(label + " attaches only the live window", showCalls[0] == (open ? 2 : 1) && view.isAttachedToWindow() == open);
+                if (open) {
+                    grants.remove(bot.id);
+                    requestWebView(sheet[0], source, props);
+                    sheet[0].dismiss(false);
+                    UserConfig.setSelectedAccount(other);
+                    UserConfig.setSelectedAccount(account);
+                    grants.put(bot.id, SystemClock.elapsedRealtime());
+                }
+            });
+            if (action == WebViewAction.OPEN) {
+                awaitUi(label + " closes", () -> !((View) sheet[0].getWindowView()).isAttachedToWindow());
+                expect(label + " stays closed after switching back", showCalls[0] == 2);
+            }
+        } finally {
+            onMainChecked(() -> {
+                if (UserConfig.selectedAccount != account) UserConfig.setSelectedAccount(account);
+                if (sheet[0] != null) sheet[0].dismiss(false);
+                grants.remove(bot.id);
+            });
+        }
+    }
+
+    private static void requestWebView(BottomSheetTabsOverlay.Sheet sheet, BaseFragment source, WebViewRequestProps props) {
+        if (sheet instanceof BotWebViewSheet) ((BotWebViewSheet) sheet).requestWebView(source, props);
+        else ((BotWebViewAttachedSheet) sheet).requestWebView(source, props);
     }
 
     private void runChecks() throws Exception {
@@ -401,7 +511,7 @@ public final class ChildgramAccessInstrumentation extends Instrumentation {
         Method visibleGift = ChildgramUsageTracker.class.getDeclaredMethod("visibleGiftSheet", Activity.class);
         visibleGift.setAccessible(true);
         Object[] original = new Object[1];
-        awaitUsageUi("launched activity has a foreground usage screen", () -> {
+        awaitUi("launched activity has a foreground usage screen", () -> {
             original[0] = current.invoke(null);
             return original[0] != null;
         });
@@ -414,7 +524,7 @@ public final class ChildgramAccessInstrumentation extends Instrumentation {
                 gift[0] = new CraftGiftSheet(activity);
                 showUsageSheet(gift[0], activity);
             });
-            awaitUsageUi("shown gift window becomes the visible gift", () -> usageSheetVisible(gift[0])
+            awaitUi("shown gift window becomes the visible gift", () -> usageSheetVisible(gift[0])
                     && visibleGift.invoke(null, activity) == gift[0]);
             onMainChecked(() -> {
                 Object screen = current.invoke(null);
@@ -425,7 +535,7 @@ public final class ChildgramAccessInstrumentation extends Instrumentation {
                 ordinary[0] = new BottomSheet(activity, false);
                 showUsageSheet(ordinary[0], activity);
             });
-            awaitUsageUi("shown ordinary window covers the gift below", () -> usageSheetVisible(ordinary[0])
+            awaitUi("shown ordinary window covers the gift below", () -> usageSheetVisible(ordinary[0])
                     && visibleGift.invoke(null, activity) == null);
             onMainChecked(() -> {
                 Object screen = current.invoke(null);
@@ -433,10 +543,10 @@ public final class ChildgramAccessInstrumentation extends Instrumentation {
                         && originalKey.equals(fieldValue(screen, "key")));
                 ordinary[0].dismiss();
             });
-            awaitUsageUi("closing ordinary window reveals the gift again", () -> usageSheetVisible(gift[0])
+            awaitUi("closing ordinary window reveals the gift again", () -> usageSheetVisible(gift[0])
                     && visibleGift.invoke(null, activity) == gift[0]);
             onMainChecked(() -> gift[0].dismiss());
-            awaitUsageUi("closing gift restores the original category and owner", () -> {
+            awaitUi("closing gift restores the original category and owner", () -> {
                 Object screen = current.invoke(null);
                 return visibleGift.invoke(null, activity) == null && screen != null
                         && originalKey.equals(fieldValue(screen, "key")) && (Long) fieldValue(screen, "owner") == originalOwner;
@@ -476,7 +586,7 @@ public final class ChildgramAccessInstrumentation extends Instrumentation {
         if (error.get() instanceof Error) throw (Error) error.get();
     }
 
-    private void awaitUsageUi(String label, MainCondition condition) throws Exception {
+    private void awaitUi(String label, MainCondition condition) throws Exception {
         long deadline = SystemClock.elapsedRealtime() + 5000;
         boolean[] ready = {false};
         do {

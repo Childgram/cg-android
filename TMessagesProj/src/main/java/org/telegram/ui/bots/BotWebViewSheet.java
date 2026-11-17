@@ -1,8 +1,5 @@
 package org.telegram.ui.bots;
 
-import org.telegram.messenger.ChildgramAccess;
-import org.telegram.messenger.BuildVars;
-import org.telegram.messenger.ApplicationLoader;
 import static org.telegram.messenger.AndroidUtilities.dp;
 import static org.telegram.messenger.AndroidUtilities.lerp;
 import static org.telegram.ui.Components.Bulletin.DURATION_PROLONG;
@@ -294,6 +291,7 @@ public class BotWebViewSheet extends Dialog implements NotificationCenter.Notifi
     };
 
     private int actionBarColorKey = -1;
+    private final ChildgramWebViewAccess access = new ChildgramWebViewAccess();
     private WebViewRequestProps requestProps;
     private boolean backButtonShown;
     private boolean forceExpnaded;
@@ -366,7 +364,7 @@ public class BotWebViewSheet extends Dialog implements NotificationCenter.Notifi
 
     public boolean restoreState(BaseFragment fragment, BottomSheetTabs.WebTabData tab) {
         if (tab == null || tab.props == null) return false;
-        if (BuildVars.CHILDGRAM && !ChildgramAccess.getInstance(tab.props.currentAccount).isAllowed(tab.props.botId)) return false;
+        if (!access.canShow(tab.props.currentAccount, tab.props.botId)) return false;
         fromTab = true;
         if (overrideBackgroundColor = tab.overrideBackgroundColor) {
             setBackgroundColor(tab.backgroundColor, true, false);
@@ -796,6 +794,7 @@ public class BotWebViewSheet extends Dialog implements NotificationCenter.Notifi
                             if (MessagesController.getInstance(currentAccount).checkCanOpenChat(args1, lastFragment)) {
                                 overlayActionBarLayoutDialog.dismiss();
 
+                                access.close();
                                 dismissed = true;
                                 AndroidUtilities.cancelRunOnUIThread(pollRunnable);
 
@@ -1437,22 +1436,13 @@ public class BotWebViewSheet extends Dialog implements NotificationCenter.Notifi
 
     public void requestWebView(BaseFragment fragment, WebViewRequestProps props) {
         this.requestProps = props;
-        if (BuildVars.CHILDGRAM && !ChildgramAccess.getInstance(props.currentAccount).isAllowed(props.botId)) {
-            this.currentAccount = props.currentAccount;
-            this.botId = props.botId;
-            final BaseFragment source = fragment != null ? fragment : LaunchActivity.getSafeLastFragment();
-            ChildgramAccess.getInstance(props.currentAccount).check(props.botId, fragment, () -> {
-                if (dismissed || requestProps != props || currentAccount != props.currentAccount || botId != props.botId
-                        || ApplicationLoader.mainInterfacePaused || UserConfig.selectedAccount != props.currentAccount
-                        || source == null || source.getParentActivity() == null || LaunchActivity.getSafeLastFragment() != source) return;
-                requestWebView(fragment, props);
-                show();
-            });
-            return;
-        }
         this.currentAccount = props.currentAccount;
-        this.peerId = props.peerId;
         this.botId = props.botId;
+        access.request(fragment, props, () -> loadWebView(fragment, props), this::show);
+    }
+
+    private void loadWebView(BaseFragment fragment, WebViewRequestProps props) {
+        this.peerId = props.peerId;
         this.replyToMsgId = props.replyToMsgId;
         this.monoforumTopicId = props.monoforumTopicId;
         this.silent = props.silent;
@@ -2085,7 +2075,7 @@ public class BotWebViewSheet extends Dialog implements NotificationCenter.Notifi
 
     @Override
     public void show() {
-        if (BuildVars.CHILDGRAM && !ChildgramAccess.getInstance(currentAccount).isAllowed(botId)) return;
+        if (!access.canShow(currentAccount, botId)) return;
         if (!AndroidUtilities.isSafeToShow(getContext())) return;
         setOpen(true);
         windowView.setAlpha(0f);
@@ -2200,6 +2190,7 @@ public class BotWebViewSheet extends Dialog implements NotificationCenter.Notifi
             intoTabs = false;
         }
 
+        access.close();
         dismissed = true;
         setOpen(false);
         AndroidUtilities.cancelRunOnUIThread(pollRunnable);
@@ -2240,6 +2231,7 @@ public class BotWebViewSheet extends Dialog implements NotificationCenter.Notifi
     }
 
     public void release() {
+        access.close();
         if (superDismissed) return;
         try {
             super.dismiss();

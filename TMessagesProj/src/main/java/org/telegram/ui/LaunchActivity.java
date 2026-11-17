@@ -1233,7 +1233,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         switchingAccount = true;
 
         ConnectionsManager.getInstance(currentAccount).setAppPaused(true, false);
-        UserConfig.selectedAccount = account;
+        UserConfig.setSelectedAccount(account);
         UserConfig.getInstance(0).saveConfig(false);
 
         checkCurrentAccount();
