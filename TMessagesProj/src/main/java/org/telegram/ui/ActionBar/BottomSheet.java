@@ -1385,6 +1385,7 @@ public class BottomSheet extends Dialog implements BaseFragment.AttachedSheet {
             @Override
             protected void onAttachedToWindow() {
                 super.onAttachedToWindow();
+                org.telegram.messenger.ChildgramUsageTracker.onSheetVisibility(BottomSheet.this, true);
                 Bulletin.addDelegate(this, new Bulletin.Delegate() {
                     @Override
                     public int getTopOffset(int tag) {
@@ -1396,6 +1397,7 @@ public class BottomSheet extends Dialog implements BaseFragment.AttachedSheet {
             @Override
             protected void onDetachedFromWindow() {
                 super.onDetachedFromWindow();
+                org.telegram.messenger.ChildgramUsageTracker.onSheetVisibility(BottomSheet.this, false);
                 Bulletin.removeDelegate(this);
             }
         };

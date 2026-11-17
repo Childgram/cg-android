@@ -139,6 +139,11 @@ public class StarGiftPreviewSheet extends BottomSheetWithRecyclerListView {
         return 0;
     }
 
+    @Override
+    public int getCurrentAccount() {
+        return currentAccount;
+    }
+
     public StarGiftPreviewSheet(Context context, Theme.ResourcesProvider resourcesProvider, int currentAccount, String collectionTitle, ArrayList<TL_stars.StarGiftAttribute> attributes, boolean crafting) {
         super(context, null, false, false, false, resourcesProvider);
         this.currentAccount = currentAccount;

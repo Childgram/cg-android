@@ -190,6 +190,11 @@ public class GiftSheet extends BottomSheetWithRecyclerListView implements Notifi
     private StarParticlesView particlesView;
     private @Nullable LinkSpanDrawable.LinksTextView subtitleStarsView2;
 
+    @Override
+    public int getCurrentAccount() {
+        return currentAccount;
+    }
+
     public GiftSheet(Context context, int currentAccount, long userId, Utilities.Callback<Boolean> closeParentSheet) {
         this(context, currentAccount, userId, null, closeParentSheet);
     }

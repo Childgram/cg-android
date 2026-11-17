@@ -283,6 +283,7 @@
     <string name="ChildgramUsageContacts">Контакты</string>
     <string name="ChildgramUsageCalls">Звонки</string>
     <string name="ChildgramUsageProfile">Профили</string>
+    <string name="ChildgramUsageGifts">Подарки</string>
     <string name="ChildgramUsageOther">Другие экраны</string>
     <string name="ChildgramUsageClear">Очистить старую историю</string>
     <string name="ChildgramUsageClearInfo">Сохранить сегодня и предыдущие 7 полных дней. Будет удалена только локальная история времени.</string>

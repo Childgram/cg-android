@@ -1958,6 +1958,11 @@ public class ResaleGiftsFragment extends BaseFragment implements FactorAnimator.
 
         private StarGiftSheet.ActionView actionView;
 
+        @Override
+        public int getCurrentAccount() {
+            return state.currentAccount;
+        }
+
         public SelectGiftSheet(Context context, String collectionName, State state) {
             super(context, null, false, false, false, ActionBarType.SLIDING, null);
 

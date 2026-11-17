@@ -5,15 +5,29 @@ import android.app.Instrumentation;
 import android.content.Context;
 import android.content.ContextWrapper;
 import android.content.Intent;
+import android.graphics.Rect;
 import android.os.Bundle;
+import android.os.SystemClock;
+import android.widget.TextView;
 
 import org.telegram.tgnet.TLRPC;
 import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.tl.TL_account;
+import org.telegram.ui.ActionBar.BaseFragment;
+import org.telegram.ui.ActionBar.BottomSheet;
+import org.telegram.ui.CallLogActivity;
 import org.telegram.ui.ChatActivity;
+import org.telegram.ui.ChildgramParentalActivity;
+import org.telegram.ui.ChildgramParentalPinActivity;
+import org.telegram.ui.ChildgramUsageActivity;
+import org.telegram.ui.ContactsActivity;
+import org.telegram.ui.DialogsActivity;
+import org.telegram.ui.LaunchActivity;
 import org.telegram.ui.PhotoViewer;
 import org.telegram.ui.ProfileActivity;
+import org.telegram.ui.SettingsActivity;
+import org.telegram.ui.Stars.CraftGiftSheet;
 import org.telegram.messenger.browser.Browser;
 import org.telegram.utils.pip.PipContent;
 import org.telegram.utils.pip.PipCoordinator;
@@ -21,18 +35,21 @@ import org.telegram.utils.pip.PipSession;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** Runs against the installed app. Fixtures exist only in its in-memory peer cache. */
+/** Runs against the installed app with synthetic peers and optional local usage UI fixtures. */
 public final class ChildgramAccessInstrumentation extends Instrumentation {
     private int assertions;
     private String failure;
     private boolean verifyPrivacy;
     private boolean verifyUsage;
+    private boolean verifyUsageUi;
     private boolean usageOnly;
     private ChildgramUsageStorageInstrumentation.Result usageResult;
     private int exceptionCount = -1;
@@ -43,6 +60,7 @@ public final class ChildgramAccessInstrumentation extends Instrumentation {
         verifyPrivacy = arguments != null && "true".equals(arguments.getString("verify_privacy"));
         usageOnly = arguments != null && "true".equals(arguments.getString("usage_only"));
         verifyUsage = usageOnly || arguments != null && "true".equals(arguments.getString("verify_usage"));
+        verifyUsageUi = arguments != null && "true".equals(arguments.getString("verify_usage_ui"));
         start();
     }
 
@@ -51,12 +69,17 @@ public final class ChildgramAccessInstrumentation extends Instrumentation {
         runOnMainSync(() -> {
             try {
                 ApplicationLoader.postInitApplication();
+                checkUsageScreens();
                 if (!usageOnly) runChecks();
             } catch (Throwable error) {
                 // Exception messages can contain user data. Report only the type or assertion label.
                 failure = error instanceof AssertionError ? error.getMessage() : error.getClass().getSimpleName();
             }
         });
+        if (failure == null && verifyUsageUi) {
+            try { checkUsageWindows(); }
+            catch (Throwable error) { failure = error instanceof AssertionError ? error.getMessage() : error.getClass().getSimpleName(); }
+        }
         if (failure == null && verifyUsage) {
             try {
                 usageResult = ChildgramUsageStorageInstrumentation.run();
@@ -243,6 +266,183 @@ public final class ChildgramAccessInstrumentation extends Instrumentation {
         expect("leaving parent revokes comments", !policy.isFragmentAllowed(comments));
         expect("leaving parent revokes comment sending", !policy.canSend(-discussion.id, root));
         expect("leaving parent revokes comment media", !policy.canViewMessage(root));
+    }
+
+    private void checkUsageScreens() throws Exception {
+        Method screenKey = ChildgramUsageTracker.class.getDeclaredMethod("screenKey", BaseFragment.class);
+        screenKey.setAccessible(true);
+        // Constructors only: no navigation, onFragmentCreate, account requests or real usage intervals.
+        ChildgramUsageActivity usage = new ChildgramUsageActivity();
+        Object[][] screens = {
+                {new DialogsActivity(new Bundle()), "dialogs"},
+                {new SettingsActivity(), "settings"},
+                {new ContactsActivity(new Bundle()), "contacts"},
+                {new CallLogActivity(), "calls"},
+                {new ProfileActivity(new Bundle()), "profile"},
+                {usage, "settings"},
+                {new ChildgramParentalActivity(), "settings"},
+                {new ChildgramParentalPinActivity(false, null), "settings"},
+                {new SettingsActivity() {}, "settings"},
+                {new BaseFragment() {}, "other"}
+        };
+        for (int i = 0; i < screens.length; i++)
+            expect("screen category is stable for fixture " + i, screens[i][1].equals(screenKey.invoke(null, screens[i][0])));
+
+        Method giftType = ChildgramUsageTracker.class.getDeclaredMethod("isGiftSheet", BottomSheet.class);
+        giftType.setAccessible(true);
+        Method visibleGift = ChildgramUsageTracker.class.getDeclaredMethod("visibleGiftSheet", Activity.class);
+        visibleGift.setAccessible(true);
+        Field sheetsField = ChildgramUsageTracker.class.getDeclaredField("visibleSheets");
+        sheetsField.setAccessible(true);
+        List<?> sheets = (List<?>) sheetsField.get(null);
+        int originalCount = sheets.size();
+        // CraftGiftSheet has no network-backed catalogue constructor. Do not show these fixture windows.
+        BottomSheet first = new CraftGiftSheet(getTargetContext());
+        BottomSheet second = new CraftGiftSheet(getTargetContext()) {};
+        BottomSheet ordinary = new BottomSheet(getTargetContext(), false);
+        try {
+            expect("craft gift window is classified as gifts", Boolean.TRUE.equals(giftType.invoke(null, first)));
+            expect("anonymous gift window retains its category", Boolean.TRUE.equals(giftType.invoke(null, second)));
+            expect("ordinary window is not a gift", Boolean.FALSE.equals(giftType.invoke(null, ordinary)));
+            ChildgramUsageTracker.onSheetVisibility(ordinary, true);
+            expect("ordinary windows participate in overlay ordering", sheets.size() == originalCount + 1
+                    && sheets.get(sheets.size() - 1) == ordinary);
+            ChildgramUsageTracker.onSheetVisibility(ordinary, false);
+            ChildgramUsageTracker.onSheetVisibility(first, true);
+            ChildgramUsageTracker.onSheetVisibility(first, true);
+            expect("duplicate attachment does not duplicate a gift window", sheets.size() == originalCount + 1);
+            ChildgramUsageTracker.onSheetVisibility(second, true);
+            expect("nested gift is tracked above its parent", sheets.size() == originalCount + 2 && sheets.get(sheets.size() - 1) == second);
+            expect("gift windows do not count for an activity that is not resumed", visibleGift.invoke(null, new Activity()) == null);
+            ChildgramUsageTracker.onSheetVisibility(ordinary, true);
+            expect("ordinary overlay sits above retained gift windows", sheets.size() == originalCount + 3
+                    && sheets.get(sheets.size() - 1) == ordinary && sheets.contains(first) && sheets.contains(second));
+            ChildgramUsageTracker.onSheetVisibility(ordinary, false);
+            expect("closing ordinary overlay restores the top gift", sheets.size() == originalCount + 2
+                    && sheets.get(sheets.size() - 1) == second);
+            ChildgramUsageTracker.onSheetVisibility(second, false);
+            expect("closing nested gift restores its parent", sheets.size() == originalCount + 1 && sheets.get(sheets.size() - 1) == first);
+            ChildgramUsageTracker.onSheetVisibility(second, true);
+            ChildgramUsageTracker.onSheetVisibility(first, false);
+            expect("detaching older gift preserves the nested gift", !sheets.contains(first) && sheets.get(sheets.size() - 1) == second);
+        } finally {
+            ChildgramUsageTracker.onSheetVisibility(first, false);
+            ChildgramUsageTracker.onSheetVisibility(second, false);
+            ChildgramUsageTracker.onSheetVisibility(ordinary, false);
+        }
+        expect("gift fixture leaves existing tracking unchanged", sheets.size() == originalCount);
+
+        Method label = ChildgramUsageActivity.class.getDeclaredMethod("label", ChildgramUsageStorage.Entry.class);
+        label.setAccessible(true);
+        ChildgramUsageStorage.Entry entry = new ChildgramUsageStorage.Entry();
+        entry.key = entry.label = "gifts";
+        int giftLabel = getTargetContext().getResources().getIdentifier("ChildgramUsageGifts", "string", getTargetContext().getPackageName());
+        expect("gift statistics have a translated label", giftLabel != 0 && LocaleController.getString(giftLabel).equals(label.invoke(usage, entry)));
+        entry.key = entry.label = "other";
+        int otherLabel = getTargetContext().getResources().getIdentifier("ChildgramUsageOther", "string", getTargetContext().getPackageName());
+        expect("old other records keep their original category", otherLabel != 0 && LocaleController.getString(otherLabel).equals(label.invoke(usage, entry)));
+    }
+
+    private void checkUsageWindows() throws Exception {
+        // LaunchActivity is singleTask: startActivitySync must create it, not wait for a reused activity.
+        expect("usage UI check starts in a fresh instrumentation process", LaunchActivity.instance == null);
+        Activity activity = startActivitySync(new Intent(getTargetContext(), LaunchActivity.class)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        Method current = ChildgramUsageTracker.class.getDeclaredMethod("currentScreen");
+        current.setAccessible(true);
+        Method visibleGift = ChildgramUsageTracker.class.getDeclaredMethod("visibleGiftSheet", Activity.class);
+        visibleGift.setAccessible(true);
+        Object[] original = new Object[1];
+        awaitUsageUi("launched activity has a foreground usage screen", () -> {
+            original[0] = current.invoke(null);
+            return original[0] != null;
+        });
+        String originalKey = (String) fieldValue(original[0], "key");
+        long originalOwner = (Long) fieldValue(original[0], "owner");
+        expect("usage UI check has a non-gift base screen", !originalKey.equals("gifts"));
+        BottomSheet[] gift = new BottomSheet[1], ordinary = new BottomSheet[1];
+        try {
+            onMainChecked(() -> {
+                gift[0] = new CraftGiftSheet(activity);
+                showUsageSheet(gift[0], activity);
+            });
+            awaitUsageUi("shown gift window becomes the visible gift", () -> usageSheetVisible(gift[0])
+                    && visibleGift.invoke(null, activity) == gift[0]);
+            onMainChecked(() -> {
+                Object screen = current.invoke(null);
+                expect("shown gift counts as gifts", screen != null && fieldValue(screen, "key").equals("gifts"));
+                expect("gift browsing does not count as full-screen video", Boolean.FALSE.equals(fieldValue(screen, "video")));
+                expect("gift time belongs to the gift window's account", (Long) fieldValue(screen, "owner")
+                        == UserConfig.getInstance(gift[0].getCurrentAccount()).getClientUserId());
+                ordinary[0] = new BottomSheet(activity, false);
+                showUsageSheet(ordinary[0], activity);
+            });
+            awaitUsageUi("shown ordinary window covers the gift below", () -> usageSheetVisible(ordinary[0])
+                    && visibleGift.invoke(null, activity) == null);
+            onMainChecked(() -> {
+                Object screen = current.invoke(null);
+                expect("covered gift no longer determines the usage category", screen != null
+                        && originalKey.equals(fieldValue(screen, "key")));
+                ordinary[0].dismiss();
+            });
+            awaitUsageUi("closing ordinary window reveals the gift again", () -> usageSheetVisible(gift[0])
+                    && visibleGift.invoke(null, activity) == gift[0]);
+            onMainChecked(() -> gift[0].dismiss());
+            awaitUsageUi("closing gift restores the original category and owner", () -> {
+                Object screen = current.invoke(null);
+                return visibleGift.invoke(null, activity) == null && screen != null
+                        && originalKey.equals(fieldValue(screen, "key")) && (Long) fieldValue(screen, "owner") == originalOwner;
+            });
+        } finally {
+            onMainChecked(() -> {
+                if (ordinary[0] != null) ordinary[0].dismiss();
+                if (gift[0] != null) gift[0].dismiss();
+            });
+        }
+    }
+
+    private static void showUsageSheet(BottomSheet sheet, Context context) {
+        TextView content = new TextView(context);
+        content.setText("Childgram usage check");
+        content.setMinHeight(AndroidUtilities.dp(180));
+        sheet.setCustomView(content);
+        sheet.show();
+    }
+
+    private static boolean usageSheetVisible(BottomSheet sheet) {
+        Rect bounds = new Rect();
+        return sheet.getContainerView().isAttachedToWindow() && sheet.getContainerView().isShown()
+                && sheet.getContainerView().getGlobalVisibleRect(bounds) && !bounds.isEmpty();
+    }
+
+    private interface MainAction { void run() throws Exception; }
+    private interface MainCondition { boolean matches() throws Exception; }
+
+    private void onMainChecked(MainAction action) throws Exception {
+        AtomicReference<Throwable> error = new AtomicReference<>();
+        runOnMainSync(() -> {
+            try { action.run(); }
+            catch (Throwable failure) { error.set(failure); }
+        });
+        if (error.get() instanceof Exception) throw (Exception) error.get();
+        if (error.get() instanceof Error) throw (Error) error.get();
+    }
+
+    private void awaitUsageUi(String label, MainCondition condition) throws Exception {
+        long deadline = SystemClock.elapsedRealtime() + 5000;
+        boolean[] ready = {false};
+        do {
+            onMainChecked(() -> ready[0] = condition.matches());
+            if (ready[0]) break;
+            SystemClock.sleep(25);
+        } while (SystemClock.elapsedRealtime() < deadline);
+        expect(label, ready[0]);
+    }
+
+    private static Object fieldValue(Object object, String name) throws Exception {
+        Field field = object.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(object);
     }
 
     private void checkVideoUsage(int account) throws Exception {

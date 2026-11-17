@@ -191,6 +191,7 @@ public final class ChildgramUsageActivity extends UniversalFragment {
             case "contacts": return getString(R.string.ChildgramUsageContacts);
             case "calls": return getString(R.string.ChildgramUsageCalls);
             case "profile": return getString(R.string.ChildgramUsageProfile);
+            case "gifts": return getString(R.string.ChildgramUsageGifts);
             case "other": return getString(R.string.ChildgramUsageOther);
             default: return entry.label;
         }

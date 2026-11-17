@@ -46,6 +46,14 @@ public final class ChildgramUsageStorageInstrumentation {
             // A checkpoint updates the existing interval rather than counting it twice.
             storage.save("today", "chat:today", "Today fixture", today + 10 * hour, today + 10 * hour + 180_000, false);
             storage.save("video", "chat:today", "Today fixture", today + 10 * hour + 180_000, today + 10 * hour + 240_000, true);
+            long yesterday = today - 24 * hour;
+            storage.save("gift", "gifts", "gifts", yesterday, yesterday + 60_000, false);
+            storage.save("legacy-other", "other", "other", yesterday + 60_000, yesterday + 120_000, false);
+            ChildgramUsageStorage.Report gifts = read(storage, "2026-10-30");
+            expect("gift and legacy other records remain separate", !gifts.failed && gifts.entries.size() == 2
+                    && gifts.entries.stream().anyMatch(entry -> entry.key.equals("gifts") && entry.total == 60_000)
+                    && gifts.entries.stream().anyMatch(entry -> entry.key.equals("other") && entry.total == 60_000));
+            expect("gift browsing is counted once and is not full-screen video", gifts.total == 120_000 && gifts.video == 0);
 
             char[] padding = new char[65_536];
             Arrays.fill(padding, 'x');

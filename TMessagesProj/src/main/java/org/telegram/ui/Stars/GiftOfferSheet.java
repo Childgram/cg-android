@@ -152,6 +152,7 @@ public class GiftOfferSheet extends BottomSheetWithRecyclerListView {
     ) {
         super(context, null, true, false,
             false, false, ActionBarType.SLIDING, resourcesProvider);
+        this.currentAccount = currentAccount;
         ignoreTouchActionBar = false;
         headerMoveTop = dp(12);
         topPadding = 0.2f;

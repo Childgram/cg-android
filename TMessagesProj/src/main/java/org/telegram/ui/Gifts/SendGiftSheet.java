@@ -145,6 +145,11 @@ public class SendGiftSheet extends BottomSheetWithRecyclerListView implements No
 
     public final AnimationNotificationsLocker animationsLock = new AnimationNotificationsLocker();
 
+    @Override
+    public int getCurrentAccount() {
+        return currentAccount;
+    }
+
     public SendGiftSheet(Context context, int currentAccount, TL_stars.StarGift gift, long dialogId, Runnable closeParentSheet, boolean forceUpgrade, boolean forceNotUpgrade) {
         this(context, currentAccount, gift, null, dialogId, closeParentSheet, forceUpgrade, forceNotUpgrade);
     }

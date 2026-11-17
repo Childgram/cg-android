@@ -30,10 +30,11 @@ EOF
     fi
 '
 
-if [[ "${1:-}" == --device || "${1:-}" == --usage-device ]]; then
+if [[ "${1:-}" == --device || "${1:-}" == --usage-device || "${1:-}" == --usage-ui-device ]]; then
     ./dev/emulator adb install -r .local/checks/childgram/tests.apk
     args=(-e verify_usage true)
     if [[ "${1:-}" == --device ]]; then args+=(-e verify_privacy true); else args+=(-e usage_only true); fi
+    if [[ "${1:-}" == --usage-ui-device ]]; then args+=(-e verify_usage_ui true); fi
     result=$(./dev/emulator adb shell am instrument -w "${args[@]}" org.childgram.tests/org.telegram.messenger.ChildgramAccessInstrumentation)
     printf '%s\n' "$result"
     [[ "$result" == *'INSTRUMENTATION_CODE: -1'* ]] && [[ "$result" == *'status=passed'* ]]
