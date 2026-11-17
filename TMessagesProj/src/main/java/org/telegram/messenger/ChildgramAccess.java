@@ -4,6 +4,7 @@ import android.os.Bundle;
 import android.os.SystemClock;
 import android.widget.Toast;
 
+import org.telegram.messenger.browser.Browser;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.TLRPC;
@@ -18,6 +19,7 @@ import org.telegram.ui.TopicsFragment;
 
 import java.util.ArrayList;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Account-scoped access decisions. Reading a peer or a forwarded post never grants access. */
 public final class ChildgramAccess extends BaseController {
@@ -97,6 +99,36 @@ public final class ChildgramAccess extends BaseController {
 
     public void check(long dialogId, BaseFragment source, Runnable allowed) {
         check(dialogId, source, allowed, () -> {});
+    }
+
+    /** Gate the resolver's result before Telegram opens it. Null and MAX_VALUE are resolver errors. */
+    public static Utilities.Callback<Long> guardResolvedLink(int account, Browser.Progress progress,
+            Runnable dismissLoading, Utilities.Callback<Long> openPeer) {
+        if (!BuildVars.CHILDGRAM) return openPeer;
+        ChildgramAccess access = getInstance(account);
+        long owner = access.getUserConfig().getClientUserId();
+        AtomicBoolean cancelled = new AtomicBoolean();
+        if (progress != null) progress.onCancel(() -> cancelled.set(true));
+        return peerId -> {
+            if (cancelled.get()) return;
+            BaseFragment source = LaunchActivity.getLastFragment();
+            Runnable open = () -> {
+                if (cancelled.get()) return;
+                if (UserConfig.selectedAccount == account && access.getUserConfig().getClientUserId() == owner
+                        && (source == null || LaunchActivity.getLastFragment() == source)) {
+                    openPeer.run(peerId);
+                } else {
+                    dismissLoading.run();
+                }
+            };
+            if (peerId == null || peerId == Long.MAX_VALUE || access.isAllowed(peerId)) {
+                open.run();
+            } else {
+                access.check(peerId, source, open, () -> {
+                    if (!cancelled.get()) dismissLoading.run();
+                });
+            }
+        };
     }
 
     /** Also completes a pending widget request when access cannot be granted. */

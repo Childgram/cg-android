@@ -4386,7 +4386,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
             if (progress != null) {
                 progress.init();
             }
-            MessagesController.getInstance(intentAccount).getUserNameResolver().resolve(username, referrer, (peerId) -> {
+            MessagesController.getInstance(intentAccount).getUserNameResolver().resolve(username, referrer, ChildgramAccess.guardResolvedLink(intentAccount, progress, dismissLoading, peerId -> {
                 if (peerId != null && peerId == Long.MAX_VALUE) {
                     try {
                         dismissLoading.run();
@@ -4398,11 +4398,6 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                         .setMessage(LocaleController.getString(R.string.AffiliateLinkExpiredText))
                         .setNegativeButton(LocaleController.getString(R.string.OK), null)
                         .show();
-                    return;
-                }
-                if (BuildVars.CHILDGRAM && peerId != null && !ChildgramAccess.getInstance(intentAccount).isAllowed(peerId)) {
-                    dismissLoading.run();
-                    ChildgramAccess.getInstance(intentAccount).check(peerId, getLastFragment(), () -> runLinkRequest(intentAccount, username, group, sticker, emoji, botUser, botChat, botChannel, botChatAdminParams, message, contactToken, folderSlug, text, hasUrl, messageId, channelId, threadId, commentId, game, auth, lang, unsupportedUrl, code, loginToken, wallPaper, inputInvoiceSlug, uniqueGiftSlug, theme, voicechat, videochat, livestream, state, videoTimestamp, setAsAttachBot, attachMenuBotToOpen, attachMenuBotChoose, botAppMaybe, botAppStartParam, progress, forceNotInternalForApps, storyId, liveStory, storyAlbumId, giftCollectionId, auctionSlug, stargiftPreviewSlug, isBoost, chatLinkSlug, botCompact, botFullscreen, openedTelegram, openProfile, forceRequest, referrer, taskId, openDirect, pollOptionId));
                     return;
                 }
                 if (!LaunchActivity.this.isFinishing()) {
@@ -5050,7 +5045,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                         }
                     }
                 }
-            });
+            }));
         } else if (group != null) {
             if (state == 0 || BuildVars.CHILDGRAM) {
                 final TLRPC.TL_messages_checkChatInvite req = new TLRPC.TL_messages_checkChatInvite();

@@ -38,6 +38,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -80,6 +81,10 @@ public final class ChildgramAccessInstrumentation extends Instrumentation {
                 failure = error instanceof AssertionError ? error.getMessage() : error.getClass().getSimpleName();
             }
         });
+        if (failure == null && !usageOnly) {
+            try { checkResolvedLinks(); }
+            catch (Throwable error) { failure = error instanceof AssertionError ? error.getMessage() : error.getClass().getSimpleName(); }
+        }
         if (failure == null && verifyUsageUi) {
             try { checkUsageWindows(); }
             catch (Throwable error) { failure = error instanceof AssertionError ? error.getMessage() : error.getClass().getSimpleName(); }
@@ -146,6 +151,41 @@ public final class ChildgramAccessInstrumentation extends Instrumentation {
     private void expect(String label, boolean condition) {
         assertions++;
         if (!condition) throw new AssertionError(label);
+    }
+
+    private void checkResolvedLinks() throws InterruptedException {
+        int account = UserConfig.selectedAccount;
+        long id = 8_200_000_000_000L + (System.nanoTime() & 0xfffffff);
+        ArrayList<Long> opened = new ArrayList<>();
+        CountDownLatch denied = new CountDownLatch(1);
+        runOnMainSync(() -> {
+            MessagesController controller = MessagesController.getInstance(account);
+            UserNameResolver resolver = controller.getUserNameResolver();
+            TLRPC.User peer = new TLRPC.TL_user(), renamed = new TLRPC.TL_user();
+            peer.id = id;
+            peer.username = "childgram_fixture_" + id;
+            renamed.username = peer.username + "_old";
+            resolver.update(renamed, peer);
+
+            Utilities.Callback<Long> link = ChildgramAccess.guardResolvedLink(account, null, denied::countDown, opened::add);
+            link.run(null);
+            link.run(Long.MAX_VALUE);
+            resolver.resolve(peer.username, link);
+            Browser.Progress progress = new Browser.Progress();
+            resolver.resolve(peer.username, ChildgramAccess.guardResolvedLink(account, progress, denied::countDown, opened::add));
+            progress.cancel();
+            // Reassign the name before the posted access checks grant the original peer.
+            TLRPC.User replacement = new TLRPC.TL_user();
+            replacement.id = id + 1;
+            replacement.username = peer.username;
+            resolver.update(renamed, replacement);
+            controller.putUser(peer, true);
+            link.run(-id); // Unknown synthetic chat, never sent to Telegram.
+        });
+        expect("unresolved chat finishes loading on denial", denied.await(10, TimeUnit.SECONDS));
+        runOnMainSync(() -> {});
+        expect("resolver errors pass through and only the uncancelled original peer opens once",
+                opened.equals(Arrays.asList(null, Long.MAX_VALUE, id)));
     }
 
     private void runChecks() throws Exception {
