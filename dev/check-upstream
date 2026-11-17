@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+import argparse
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def git(*args, check=True):
+    return subprocess.run(["git", *args], cwd=ROOT, stdout=subprocess.PIPE, check=check)
+
+
+def commit(revision):
+    return git("rev-parse", "--verify", "--end-of-options", revision + "^{commit}").stdout.decode().strip()
+
+
+def paths(data):
+    return set(data.split(b"\0")) - {b""}
+
+
+def changed(base, tip):
+    return paths(git("diff", "--no-renames", "--ignore-submodules=none", "--name-only", "-z", base, tip, "--").stdout)
+
+
+def show_paths(label, names):
+    print(f"{label} ({len(names)}):")
+    for name in sorted(names):
+        path = os.fsdecode(name)
+        print("  " + (path if path.isprintable() else ascii(path)))
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Compare HEAD with an upstream revision and forecast merge conflicts.")
+    parser.add_argument("revision")
+    args = parser.parse_args()
+    ours = commit("HEAD")
+    theirs = commit(args.revision)
+    bases = git("merge-base", "--all", ours, theirs, check=False)
+    if bases.returncode == 1:
+        parser.exit(2, "HEAD and the requested revision have no common ancestor.\n")
+    bases.check_returncode()
+
+    merge = git("merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", ours, theirs, check=False)
+    if merge.returncode not in (0, 1):
+        merge.check_returncode()
+    # With -z the first field is the merged tree ID. The rest are conflicted paths.
+    conflicts = paths(merge.stdout.partition(b"\0")[2])
+
+    print(f"HEAD: {ours}\nUpstream: {theirs}")
+    for base in bases.stdout.decode().splitlines():
+        print(f"Merge base: {base}")
+        if base == theirs:
+            print("Upstream revision is already included in HEAD.")
+        show_paths("Changed on both sides", changed(base, ours) & changed(base, theirs))
+    show_paths("Conflicting paths", conflicts)
+    if merge.returncode == 1 and not conflicts:
+        print("Git reported a merge conflict without a file path.")
+    return merge.returncode
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except subprocess.CalledProcessError:
+        sys.exit(2)
