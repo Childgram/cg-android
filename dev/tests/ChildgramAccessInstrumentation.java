@@ -1,12 +1,16 @@
 package org.telegram.messenger;
 
+import android.accessibilityservice.AccessibilityService;
 import android.app.Activity;
+import android.app.NotificationManager;
 import android.app.Instrumentation;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.ContextWrapper;
 import android.content.Intent;
 import android.graphics.Rect;
 import android.os.Bundle;
+import android.os.ParcelFileDescriptor;
 import android.os.SystemClock;
 import android.view.View;
 import android.widget.TextView;
@@ -18,6 +22,7 @@ import org.telegram.tgnet.tl.TL_account;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.BottomSheet;
 import org.telegram.ui.ActionBar.BottomSheetTabsOverlay;
+import org.telegram.ui.BubbleActivity;
 import org.telegram.ui.CallLogActivity;
 import org.telegram.ui.ChatActivity;
 import org.telegram.ui.ChildgramParentalActivity;
@@ -38,6 +43,8 @@ import org.telegram.utils.pip.PipContent;
 import org.telegram.utils.pip.PipCoordinator;
 import org.telegram.utils.pip.PipSession;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -57,6 +64,8 @@ public final class ChildgramAccessInstrumentation extends Instrumentation {
     private boolean verifyPrivacy;
     private boolean verifyUsage;
     private boolean verifyUsageUi;
+    private boolean verifyBubble;
+    private final Bundle bubbleTimes = new Bundle();
     private boolean verifyPip;
     private String pipMode;
     private boolean usageOnly;
@@ -70,6 +79,7 @@ public final class ChildgramAccessInstrumentation extends Instrumentation {
         usageOnly = arguments != null && "true".equals(arguments.getString("usage_only"));
         verifyUsage = usageOnly || arguments != null && "true".equals(arguments.getString("verify_usage"));
         verifyUsageUi = arguments != null && "true".equals(arguments.getString("verify_usage_ui"));
+        verifyBubble = arguments != null && "true".equals(arguments.getString("verify_bubble"));
         verifyPip = arguments != null && "true".equals(arguments.getString("verify_pip"));
         pipMode = arguments == null ? null : arguments.getString("pip_mode");
         start();
@@ -99,6 +109,10 @@ public final class ChildgramAccessInstrumentation extends Instrumentation {
             try { checkWebViewWindows(); }
             catch (Throwable error) { failure = error instanceof AssertionError ? error.getMessage() : error.getClass().getSimpleName(); }
         }
+        if (failure == null && verifyBubble) {
+            try { checkBubbleUsage(); }
+            catch (Throwable error) { failure = error instanceof AssertionError ? error.getMessage() : error.getClass().getSimpleName(); }
+        }
         if (failure == null && verifyPip) {
             try { assertions += ChildgramPipChecks.run(this, pipMode); }
             catch (Throwable error) { failure = error instanceof AssertionError ? error.getMessage() : error.getClass().getSimpleName(); }
@@ -113,7 +127,7 @@ public final class ChildgramAccessInstrumentation extends Instrumentation {
             try { verifyPrivacy(); }
             catch (Throwable error) { failure = error instanceof AssertionError ? error.getMessage() : error.getClass().getSimpleName(); }
         }
-        Bundle report = new Bundle();
+        Bundle report = new Bundle(bubbleTimes);
         if (usageResult != null) {
             report.putInt("usageAssertions", usageResult.assertions);
             report.putLong("usageBytesBefore", usageResult.bytesBefore);
@@ -559,6 +573,139 @@ public final class ChildgramAccessInstrumentation extends Instrumentation {
         }
     }
 
+    private void checkBubbleUsage() throws Exception {
+        Context context = getTargetContext();
+        int account = UserConfig.selectedAccount;
+        long owner = UserConfig.getInstance(account).getClientUserId();
+        expect("bubble test has an active account", owner != 0);
+        long mainPeer = 8_400_000_000_000L + (System.nanoTime() & 0xfffffff);
+        long bubblePeer = mainPeer + 1;
+        onMainChecked(() -> {
+            for (long id : new long[]{mainPeer, bubblePeer}) {
+                TLRPC.User user = new TLRPC.TL_user();
+                user.id = id;
+                user.first_name = id == mainPeer ? "Main window fixture" : "Bubble fixture";
+                MessagesController.getInstance(account).putUser(user, true);
+            }
+        });
+        Intent main = chatIntent(LaunchActivity.class, account, mainPeer).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        Intent bubble = chatIntent(BubbleActivity.class, account, bubblePeer);
+        Field session = ChildgramUsageTracker.class.getDeclaredField("session");
+        session.setAccessible(true);
+        NotificationManager notifications = context.getSystemService(NotificationManager.class);
+        expect("notifications and Android bubbles enabled", notifications.areNotificationsEnabled() && notifications.areBubblesEnabled());
+        String launcher = homePackage();
+        int originalPreference = notifications.getBubblePreference();
+        boolean finishedOnHome = false;
+        try (ChildgramUsageStorageInstrumentation.BubbleFixture stats = ChildgramUsageStorageInstrumentation.openBubbleFixture(owner);
+             ChildgramTestBubble notification = new ChildgramTestBubble(context, bubble)) {
+            try {
+                if (originalPreference != NotificationManager.BUBBLE_PREFERENCE_ALL) {
+                    setBubblePreference(NotificationManager.BUBBLE_PREFERENCE_ALL);
+                }
+                context.startActivity(new Intent(main));
+                awaitTrackedChat(session, owner, mainPeer, false);
+                SystemClock.sleep(1500);
+                notification.post();
+                awaitTrackedChat(session, owner, bubblePeer, true);
+                long[] enteredBubble = stats.totals(mainPeer, bubblePeer);
+                expect("main chat time saved on entering bubble", enteredBubble[0] >= 1000);
+                SystemClock.sleep(1500);
+
+                goHome(session, launcher);
+                long[] home = stats.totals(mainPeer, bubblePeer);
+                expect("only bubble chat gained time in bubble", home[0] == enteredBubble[0] && home[1] - enteredBubble[1] >= 1000);
+                long homeStart = SystemClock.elapsedRealtime();
+                // Longer than a storage checkpoint: a wrongly running screen session would be saved.
+                SystemClock.sleep(11000);
+                onMainChecked(() -> expect("no active screen session while on Home", session.get(null) == null));
+                long[] idle = stats.totals(mainPeer, bubblePeer);
+                expect("Home adds no time to either chat or total screen usage", Arrays.equals(home, idle));
+                bubbleTimes.putLong("homeWaitMs", SystemClock.elapsedRealtime() - homeStart);
+                bubbleTimes.putLong("homeAddedMs", idle[2] - home[2]);
+
+                long returnStart = SystemClock.elapsedRealtime();
+                context.startActivity(new Intent(main));
+                awaitTrackedChat(session, owner, mainPeer, false);
+                SystemClock.sleep(1500);
+                goHome(session, launcher);
+                finishedOnHome = true;
+                long[] returned = stats.totals(mainPeer, bubblePeer);
+                expect("return resumes only the main chat", returned[0] - idle[0] >= 1000 && returned[1] == idle[1]);
+                expect("return does not charge time spent on Home",
+                        returned[0] - idle[0] <= SystemClock.elapsedRealtime() - returnStart);
+                bubbleTimes.putLong("mainChatMs", home[0]);
+                bubbleTimes.putLong("bubbleChatMs", home[1]);
+                bubbleTimes.putLong("mainChatAfterReturnMs", returned[0] - idle[0]);
+            } finally {
+                // End any foreground interval before the isolated storage is detached.
+                try {
+                    if (!finishedOnHome) goHome(session, launcher);
+                } finally {
+                    if (originalPreference != NotificationManager.BUBBLE_PREFERENCE_ALL) setBubblePreference(originalPreference);
+                }
+            }
+        }
+    }
+
+    private Intent chatIntent(Class<?> activity, int account, long peer) {
+        return new Intent(getTargetContext(), activity).setAction("com.tmessages.openchat.childgram.test")
+                .putExtra("currentAccount", account).putExtra("userId", peer);
+    }
+
+    private void setBubblePreference(int preference) throws Exception {
+        String command = "cmd notification set_bubbles " + getTargetContext().getPackageName() + " " + preference;
+        try (BufferedReader output = shellOutput(command)) {
+            while (output.readLine() != null) { /* Wait for the command to finish. */ }
+        }
+        expect("bubble preference updated", getTargetContext().getSystemService(NotificationManager.class).getBubblePreference() == preference);
+    }
+
+    private void awaitTrackedChat(Field session, long owner, long peer, boolean bubble) throws Exception {
+        awaitUi(bubble ? "system bubble counts its own chat" : "main window counts its own chat", 20000, () -> {
+            Activity window = bubble ? (Activity) (Object) BubbleActivity.instance : (Activity) (Object) LaunchActivity.instance;
+            if (window == null || !window.getWindow().getDecorView().isShown()) return false;
+            if (bubble ? !window.isLaunchedFromBubble() : !LaunchActivity.isResumed || BubbleActivity.instance != null) return false;
+            Object current = session.get(null);
+            return current != null && (Long) fieldValue(current, "owner") == owner
+                    && ("chat:" + peer).equals(fieldValue(current, "key"));
+        });
+    }
+
+    private BufferedReader shellOutput(String command) {
+        return new BufferedReader(new InputStreamReader(new ParcelFileDescriptor.AutoCloseInputStream(
+                getUiAutomation().executeShellCommand(command))));
+    }
+
+    private String homePackage() throws Exception {
+        try (BufferedReader output = shellOutput("cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME")) {
+            String line;
+            while ((line = output.readLine()) != null) {
+                ComponentName home = ComponentName.unflattenFromString(line.trim());
+                if (home != null) return home.getPackageName();
+            }
+        }
+        throw new AssertionError("Android has no default Home screen");
+    }
+
+    private void goHome(Field session, String launcher) throws Exception {
+        expect("Android accepts Home", getUiAutomation().performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME));
+        awaitUi("Home pauses both Telegram windows and ends screen accounting", 15000,
+                () -> BubbleActivity.instance == null && !LaunchActivity.isResumed && session.get(null) == null);
+        // A collapsed bubble can keep an accessibility window above the launcher.
+        long deadline = SystemClock.elapsedRealtime() + 10000;
+        do {
+            try (BufferedReader tasks = shellOutput("dumpsys activity activities")) {
+                String line;
+                while ((line = tasks.readLine()) != null) {
+                    if (line.contains("topResumedActivity=") && line.contains(" " + launcher + "/")) return;
+                }
+            }
+            SystemClock.sleep(100);
+        } while (SystemClock.elapsedRealtime() < deadline);
+        throw new AssertionError("Android launcher resumed after Home");
+    }
+
     private static void showUsageSheet(BottomSheet sheet, Context context) {
         TextView content = new TextView(context);
         content.setText("Childgram usage check");
@@ -587,7 +734,11 @@ public final class ChildgramAccessInstrumentation extends Instrumentation {
     }
 
     private void awaitUi(String label, MainCondition condition) throws Exception {
-        long deadline = SystemClock.elapsedRealtime() + 5000;
+        awaitUi(label, 5000, condition);
+    }
+
+    private void awaitUi(String label, long timeoutMs, MainCondition condition) throws Exception {
+        long deadline = SystemClock.elapsedRealtime() + timeoutMs;
         boolean[] ready = {false};
         do {
             onMainChecked(() -> ready[0] = condition.matches());

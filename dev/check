@@ -3,9 +3,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 if ! [[ $# == 0 ||
-        ($# == 1 && ($1 == --device || $1 == --usage-device || $1 == --usage-ui-device)) ||
+        ($# == 1 && ($1 == --device || $1 == --usage-device || $1 == --usage-ui-device || $1 == --bubble-device)) ||
         ($# == 2 && $1 == --pip-device && ($2 == system || $2 == overlay)) ]]; then
-    echo 'Usage: ./dev/check [--device | --usage-device | --usage-ui-device | --pip-device {system|overlay}]' >&2
+    echo 'Usage: ./dev/check [--device | --usage-device | --usage-ui-device | --bubble-device | --pip-device {system|overlay}]' >&2
     exit 2
 fi
 
@@ -52,6 +52,7 @@ if (( $# > 0 )); then
     args=(-e verify_usage true)
     if [[ "${1:-}" == --device ]]; then args+=(-e verify_privacy true); else args+=(-e usage_only true); fi
     if [[ "${1:-}" == --usage-ui-device ]]; then args+=(-e verify_usage_ui true); fi
+    if [[ "${1:-}" == --bubble-device ]]; then args+=(-e verify_bubble true); fi
     if [[ "${1:-}" == --pip-device ]]; then args+=(-e verify_pip true -e pip_mode "$2"); fi
     result=$(./dev/emulator adb shell am instrument -w "${args[@]}" org.childgram.tests/org.telegram.messenger.ChildgramAccessInstrumentation)
     printf '%s\n' "$result"

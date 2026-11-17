@@ -10,13 +10,16 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** Exercises the real storage against an isolated negative-owner fixture database. */
 public final class ChildgramUsageStorageInstrumentation {
     private static final long OWNER = Long.MIN_VALUE + 731;
+    private static final long BUBBLE_OWNER = Long.MIN_VALUE + 732;
     private static final String NAME = "childgram_usage_" + OWNER + ".db";
     private int assertions;
 
@@ -27,6 +30,65 @@ public final class ChildgramUsageStorageInstrumentation {
 
     public static Result run() throws Exception {
         return new ChildgramUsageStorageInstrumentation().checks();
+    }
+
+    public static BubbleFixture openBubbleFixture(long accountOwner) throws Exception {
+        if (accountOwner <= 0) throw new AssertionError("bubble fixture requires an active account");
+        synchronized (ChildgramUsageStorage.class) {
+            Map<Long, ChildgramUsageStorage> stores = instances();
+            if (stores.containsKey(BUBBLE_OWNER)) throw new AssertionError("bubble fixture is already open");
+            File file = new File(ApplicationLoader.getFilesDirFixed(), "childgram_usage_" + BUBBLE_OWNER + ".db");
+            if (!SQLiteDatabase.deleteDatabase(file) && file.exists()) throw new AssertionError("old bubble fixture could not be removed");
+            ChildgramUsageStorage storage = ChildgramUsageStorage.getInstance(BUBBLE_OWNER);
+            return new BubbleFixture(accountOwner, file, storage, stores.put(accountOwner, storage));
+        }
+    }
+
+    public static final class BubbleFixture implements AutoCloseable {
+        private final long accountOwner;
+        private final File file;
+        private final ChildgramUsageStorage storage, previous;
+        private boolean closed;
+
+        private BubbleFixture(long accountOwner, File file, ChildgramUsageStorage storage, ChildgramUsageStorage previous) {
+            this.accountOwner = accountOwner;
+            this.file = file;
+            this.storage = storage;
+            this.previous = previous;
+        }
+
+        /** Persisted foreground milliseconds for the main chat, the bubble chat, and all screens. */
+        public long[] totals(long mainPeer, long bubblePeer) throws Exception {
+            return onStorageQueue(storage, () -> {
+                long[] times = new long[3];
+                SQLiteDatabase db = (SQLiteDatabase) storageField("database").get(storage);
+                if (db == null) return times; // Nothing has been saved yet.
+                String mainKey = "chat:" + mainPeer, bubbleKey = "chat:" + bubblePeer;
+                try (Cursor rows = db.rawQuery("SELECT screen, SUM(end_utc - start_utc) FROM intervals WHERE kind=? GROUP BY screen",
+                        new String[]{Integer.toString(ChildgramUsageStorage.SCREEN)})) {
+                    while (rows.moveToNext()) {
+                        long duration = rows.getLong(1);
+                        String key = rows.getString(0);
+                        if (mainKey.equals(key)) times[0] = duration;
+                        if (bubbleKey.equals(key)) times[1] = duration;
+                        times[2] += duration;
+                    }
+                }
+                return times;
+            });
+        }
+
+        @Override
+        public void close() throws Exception {
+            synchronized (ChildgramUsageStorage.class) {
+                if (closed) return;
+                Map<Long, ChildgramUsageStorage> stores = instances();
+                if (previous == null) stores.remove(accountOwner);
+                else stores.put(accountOwner, previous);
+                closed = true;
+            }
+            closeFixture(BUBBLE_OWNER, storage, file);
+        }
     }
 
     private Result checks() throws Exception {
@@ -123,7 +185,7 @@ public final class ChildgramUsageStorageInstrumentation {
             expect("migrated legacy history survives pruning", read(storage, "2026-10-29").total == 90_000);
             expect("inside and outside PiP history survive pruning", read(storage, "2026-10-28").total == 30 * 60_000);
         } finally {
-            closeFixture(storage, file);
+            closeFixture(OWNER, storage, file);
         }
         expect("fixture database was removed", !file.exists());
         for (String suffix : new String[]{"-wal", "-shm", "-journal"}) {
@@ -217,29 +279,35 @@ public final class ChildgramUsageStorageInstrumentation {
         return result.get();
     }
 
+    private static Field storageField(String name) throws Exception {
+        Field field = ChildgramUsageStorage.class.getDeclaredField(name);
+        field.setAccessible(true);
+        return field;
+    }
+
     @SuppressWarnings("unchecked")
-    private void closeFixture(ChildgramUsageStorage storage, File file) throws Exception {
-        Field queueField = ChildgramUsageStorage.class.getDeclaredField("queue");
-        Field databaseField = ChildgramUsageStorage.class.getDeclaredField("database");
-        Field instancesField = ChildgramUsageStorage.class.getDeclaredField("instances");
-        queueField.setAccessible(true);
-        databaseField.setAccessible(true);
-        instancesField.setAccessible(true);
-        CountDownLatch closed = new CountDownLatch(1);
-        AtomicReference<Throwable> failure = new AtomicReference<>();
-        ((DispatchQueue) queueField.get(storage)).postRunnable(() -> {
-            try {
-                SQLiteDatabase database = (SQLiteDatabase) databaseField.get(storage);
-                if (database != null) database.close();
-                databaseField.set(storage, null);
-            } catch (Throwable error) { failure.set(error); }
-            finally { closed.countDown(); }
+    private static Map<Long, ChildgramUsageStorage> instances() throws Exception {
+        return (Map<Long, ChildgramUsageStorage>) storageField("instances").get(null);
+    }
+
+    private static <T> T onStorageQueue(ChildgramUsageStorage storage, Callable<T> action) throws Exception {
+        FutureTask<T> task = new FutureTask<>(action);
+        ((DispatchQueue) storageField("queue").get(storage)).postRunnable(task);
+        return task.get(30, TimeUnit.SECONDS);
+    }
+
+    private static void closeFixture(long fixtureOwner, ChildgramUsageStorage storage, File file) throws Exception {
+        onStorageQueue(storage, () -> {
+            Field field = storageField("database");
+            SQLiteDatabase db = (SQLiteDatabase) field.get(storage);
+            if (db != null) db.close();
+            field.set(storage, null);
+            return null;
         });
-        if (!closed.await(30, TimeUnit.SECONDS) || failure.get() != null) throw new AssertionError("fixture database closed safely");
         synchronized (ChildgramUsageStorage.class) {
-            ((Map<Long, ChildgramUsageStorage>) instancesField.get(null)).remove(OWNER);
+            instances().remove(fixtureOwner);
+            if (!SQLiteDatabase.deleteDatabase(file) && file.exists()) throw new AssertionError("fixture database deletion succeeded");
         }
-        if (!SQLiteDatabase.deleteDatabase(file) && file.exists()) throw new AssertionError("fixture database deletion succeeded");
     }
 
     private void expect(String label, boolean condition) {
