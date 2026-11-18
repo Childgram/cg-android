@@ -11,6 +11,7 @@ import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
+import android.graphics.drawable.ColorDrawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -27,6 +28,7 @@ import android.widget.TextView;
 
 import org.telegram.messenger.voip.VoIPPreNotificationService;
 import org.telegram.ui.CallLogActivity;
+import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.Components.ChildgramBreakOverlay;
 import org.telegram.ui.Components.voip.VoIPWindowView;
 import org.telegram.ui.LaunchActivity;
@@ -59,6 +61,7 @@ public final class ChildgramBreakInstrumentation extends Instrumentation {
     private SharedPreferences settings, clock;
     private String stage = "setup";
     private Dialog dialog;
+    private BaseFragment timingScreen;
     private View target, viewer;
     private int assertions;
     private boolean realTime;
@@ -75,8 +78,9 @@ public final class ChildgramBreakInstrumentation extends Instrumentation {
         super.callActivityOnResume(activity);
         if (coverOnResume && (Object) activity == LaunchActivity.instance) {
             lastResume = SystemClock.elapsedRealtime();
-            // Install the opaque fixture before the activity draws its first frame.
-            if (dialog == null || !dialog.isShowing() || dialog.getOwnerActivity() != activity) showFixture(activity);
+            // A Dialog registered before the activity's decor would reverse the window discovery order.
+            // Cover the first frame without registering another Android window.
+            if (timingScreen == null) activity.getWindow().getDecorView().setForeground(new ColorDrawable(Color.WHITE));
         }
     }
 
@@ -99,6 +103,16 @@ public final class ChildgramBreakInstrumentation extends Instrumentation {
         } catch (Throwable e) {
             Throwable cause = e.getCause() == null ? e : e.getCause();
             failure = stage + " / " + (cause instanceof AssertionError ? cause.getMessage() : cause.getClass().getSimpleName());
+            if (realTime) {
+                try {
+                    report.putString("timing_state", main(() -> "resumed=" + LaunchActivity.isResumed + ", foreground="
+                            + ((Object) ChildgramUsageTracker.getBreakActivity() == LaunchActivity.instance)
+                            + ", onFixture=" + (timingScreen != null && currentFragment() == timingScreen)
+                            + ", screenOn=" + ApplicationLoader.isScreenOn + ", locked=" + (SharedConfig.appLocked || SharedConfig.isWaitingForPasscodeEnter)
+                            + ", call=" + ChildgramBreakCalls.isCallActive() + ", profile=" + clock.getString("profile", "none")
+                            + ", debt=" + clock.getLong("debt", 0) + ", overlay=" + (overlay() != null)));
+                } catch (Exception ignored) {}
+            }
         } finally {
             try {
                 coverOnResume = false;
@@ -108,7 +122,10 @@ public final class ChildgramBreakInstrumentation extends Instrumentation {
                     ChildgramParentalSettings.setBreakReminderEnabled(false);
                     if (LaunchActivity.instance != null) {
                         Activity activity = (Activity) (Object) LaunchActivity.instance;
-                        if (realTime) activity.getWindow().getDecorView().setVisibility(View.INVISIBLE);
+                        if (realTime) {
+                            activity.getWindow().getDecorView().setVisibility(View.INVISIBLE);
+                            if (timingScreen != null) timingScreen.removeSelfFromStack(true);
+                        }
                         activity.finish();
                     }
                     if (dialog != null) dialog.dismiss();
@@ -165,14 +182,28 @@ public final class ChildgramBreakInstrumentation extends Instrumentation {
                 && ChildgramParentalSettings.getBreakFadeMinutes() == 10 && ChildgramParentalSettings.getBreakRestMinutes() == 5);
         coverOnResume = realTime;
         if (realTime) main(() -> {
-            if (LaunchActivity.isResumed && LaunchActivity.instance != null) showFixture((Activity) (Object) LaunchActivity.instance);
+            if (LaunchActivity.isResumed && LaunchActivity.instance != null) {
+                Activity activity = (Activity) (Object) LaunchActivity.instance;
+                activity.getWindow().getDecorView().setForeground(new ColorDrawable(Color.WHITE));
+            }
             return null;
         });
         bringToFront();
-        await("app opens", () -> LaunchActivity.isResumed && currentFragment() != null);
+        await("app opens", () -> LaunchActivity.isResumed && currentFragment() != null
+                && ((Activity) (Object) LaunchActivity.instance).getWindow().getDecorView().isAttachedToWindow());
         expect("no real call active", !main(ChildgramBreakCalls::isCallActive));
         main(() -> {
-            if (dialog == null) showFixture((Activity) (Object) LaunchActivity.instance);
+            if (realTime) {
+                // Exercise ordinary, countable Telegram navigation regardless of the screen left by a previous run.
+                timingScreen = new BaseFragment() {
+                    @Override protected View createView(Context context) {
+                        return fragmentView = fixtureText(context);
+                    }
+                };
+                expect("present safe timing fixture", ((BaseFragment) currentFragment()).presentFragment(timingScreen, false, true));
+            } else {
+                showFixture((Activity) (Object) LaunchActivity.instance);
+            }
             return null;
         });
     }
@@ -180,7 +211,13 @@ public final class ChildgramBreakInstrumentation extends Instrumentation {
     private void showFixture(Activity activity) {
         dialog = new Dialog(activity);
         dialog.setOwnerActivity(activity);
-        TextView sample = new TextView(activity);
+        dialog.setContentView(fixtureText(activity));
+        dialog.show();
+        dialog.getWindow().setLayout(-1, -1);
+    }
+
+    private View fixtureText(Context context) {
+        TextView sample = new TextView(context);
         sample.setText("Childgram\n\nТестовый экран для проверки перерыва");
         sample.setTextSize(20);
         sample.setTextColor(Color.BLACK);
@@ -192,9 +229,7 @@ public final class ChildgramBreakInstrumentation extends Instrumentation {
             if (event.getActionMasked() == MotionEvent.ACTION_CANCEL) cancels.incrementAndGet();
             return false;
         });
-        dialog.setContentView(target);
-        dialog.show();
-        dialog.getWindow().setLayout(-1, -1);
+        return target;
     }
 
     private void realTimeChecks(Bundle report) throws Exception {
@@ -204,7 +239,11 @@ public final class ChildgramBreakInstrumentation extends Instrumentation {
         PowerManager.WakeLock awake = power.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK, "Childgram:BreakTimingCheck");
         awake.acquire(240_000);
         try {
-            await("opaque fixture is visible", () -> target.isShown() && dialog.getWindow().getDecorView().hasWindowFocus());
+            Activity activity = (Activity) (Object) LaunchActivity.instance;
+            View decor = activity.getWindow().getDecorView();
+            await("opaque neutral fixture is visible", () -> currentFragment() == timingScreen && target != null
+                    && target.isShown() && target.getHeight() > 0 && decor.hasWindowFocus());
+            main(() -> { decor.setForeground(null); return null; });
             mark("checking the three parental timing editors");
             assertions += ChildgramParentalInstrumentation.checkBreakDurationDialogs(this, (Activity) (Object) LaunchActivity.instance);
             main(() -> {
@@ -221,8 +260,9 @@ public final class ChildgramBreakInstrumentation extends Instrumentation {
                 ChildgramParentalSettings.setBreakReminderEnabled(true);
                 return SystemClock.elapsedRealtime();
             });
-            await("waiting for the first real minute of use", 68_000, () -> hostIs(dialog.getWindow().getDecorView())
-                    && button("ChildgramBreakPrompt") != null);
+            await("real 1/1/1 balance starts growing on the safe fixture", 17_000, () ->
+                    "1/1/1".equals(clock.getString("profile", "")) && clock.getLong("debt", 0) > 0);
+            await("waiting for the first real minute of use", 59_000, () -> button("ChildgramBreakPrompt") != null);
             long hint = SystemClock.elapsedRealtime() - start;
             report.putLong("first_hint_ms", hint);
             expect("first hint at one minute", hint >= 59_500 && hint <= 65_000);
@@ -239,7 +279,7 @@ public final class ChildgramBreakInstrumentation extends Instrumentation {
             SystemClock.sleep(4_000);
             bringToFront();
             await("returning to the fixture restores the reminder", () -> lastResume > lastPause
-                    && hostIs(dialog.getWindow().getDecorView()) && button("ChildgramBreakPrompt") != null);
+                    && currentFragment() == timingScreen && button("ChildgramBreakPrompt") != null);
             float after = main(this::dimAmount);
             long away = lastResume - lastPause;
             report.putLong("short_pause_ms", away);
@@ -260,7 +300,7 @@ public final class ChildgramBreakInstrumentation extends Instrumentation {
             expect("full recovery takes one minute", recovery >= 58_000 && recovery <= 64_000);
             tapButton("ChildgramBreakContinue");
             await("return after full recovery shows an undimmed fixture", () -> overlay() == null
-                    && dialog.getWindow().getDecorView().hasWindowFocus());
+                    && currentFragment() == timingScreen && decor.hasWindowFocus());
         } finally {
             if (awake.isHeld()) awake.release();
         }
