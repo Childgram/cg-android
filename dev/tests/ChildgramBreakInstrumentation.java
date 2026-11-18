@@ -1,6 +1,7 @@
 package org.telegram.messenger;
 
 import android.accessibilityservice.AccessibilityService;
+import android.accessibilityservice.AccessibilityServiceInfo;
 import android.app.Activity;
 import android.app.Dialog;
 import android.app.Instrumentation;
@@ -22,8 +23,16 @@ import android.util.Log;
 import android.view.InputDevice;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.WindowInsets;
 import android.view.WindowManager;
+import android.view.WindowMetrics;
+import android.view.accessibility.AccessibilityWindowInfo;
+import android.view.inputmethod.InputMethodManager;
 import android.view.inspector.WindowInspector;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import org.telegram.messenger.voip.VoIPPreNotificationService;
@@ -59,6 +68,7 @@ public final class ChildgramBreakInstrumentation extends Instrumentation {
         return thread;
     });
     private SharedPreferences settings, clock;
+    private final Rect lastWorkingKeyboard = new Rect(), lastKeyboardTask = new Rect();
     private String stage = "setup";
     private Dialog dialog;
     private BaseFragment timingScreen;
@@ -99,7 +109,7 @@ public final class ChildgramBreakInstrumentation extends Instrumentation {
         try {
             setup();
             if (realTime) realTimeChecks(report);
-            else checks();
+            else checks(report);
         } catch (Throwable e) {
             Throwable cause = e.getCause() == null ? e : e.getCause();
             failure = stage + " / " + (cause instanceof AssertionError ? cause.getMessage() : cause.getClass().getSimpleName());
@@ -122,9 +132,9 @@ public final class ChildgramBreakInstrumentation extends Instrumentation {
                     ChildgramParentalSettings.setBreakReminderEnabled(false);
                     if (LaunchActivity.instance != null) {
                         Activity activity = (Activity) (Object) LaunchActivity.instance;
-                        if (realTime) {
+                        if (timingScreen != null) {
                             activity.getWindow().getDecorView().setVisibility(View.INVISIBLE);
-                            if (timingScreen != null) timingScreen.removeSelfFromStack(true);
+                            timingScreen.removeSelfFromStack(true);
                         }
                         activity.finish();
                     }
@@ -193,17 +203,13 @@ public final class ChildgramBreakInstrumentation extends Instrumentation {
                 && ((Activity) (Object) LaunchActivity.instance).getWindow().getDecorView().isAttachedToWindow());
         expect("no real call active", !main(ChildgramBreakCalls::isCallActive));
         main(() -> {
-            if (realTime) {
-                // Exercise ordinary, countable Telegram navigation regardless of the screen left by a previous run.
-                timingScreen = new BaseFragment() {
-                    @Override protected View createView(Context context) {
-                        return fragmentView = fixtureText(context);
-                    }
-                };
-                expect("present safe timing fixture", ((BaseFragment) currentFragment()).presentFragment(timingScreen, false, true));
-            } else {
-                showFixture((Activity) (Object) LaunchActivity.instance);
-            }
+            // Use the actual Telegram activity window without touching any account content.
+            timingScreen = new BaseFragment() {
+                @Override protected View createView(Context context) {
+                    return fragmentView = realTime ? fixtureText(context) : new InputFixture(context);
+                }
+            };
+            expect("present safe timing fixture", ((BaseFragment) currentFragment()).presentFragment(timingScreen, false, true));
             return null;
         });
     }
@@ -269,7 +275,7 @@ public final class ChildgramBreakInstrumentation extends Instrumentation {
 
             mark("letting the native window reach the middle of its fade");
             SystemClock.sleep(Math.max(0, start + 90_500 - SystemClock.elapsedRealtime()));
-            float before = main(this::dimAmount);
+            float before = visibleDim(target);
             report.putFloat("dim_at_90_seconds", before);
             expect("quadratic fade reaches about 25 percent halfway", before >= .20f && before <= .31f);
             mark("taking a short Home break");
@@ -280,14 +286,16 @@ public final class ChildgramBreakInstrumentation extends Instrumentation {
             bringToFront();
             await("returning to the fixture restores the reminder", () -> lastResume > lastPause
                     && currentFragment() == timingScreen && button("ChildgramBreakPrompt") != null);
-            float after = main(this::dimAmount);
+            SystemClock.sleep(250); // Sample the frame with the newly attached filter.
+            float after = visibleDim(target);
             long away = lastResume - lastPause;
             report.putLong("short_pause_ms", away);
             report.putFloat("dim_after_short_pause", after);
             expect("a short background pause immediately recovers visibility", after < before - .025f && after > 0);
 
-            await("waiting for the real cap", 55_000, () -> button("ChildgramBreakContinue") != null && dimAmount() == 1f);
+            await("waiting for the real cap", 55_000, () -> button("ChildgramBreakContinue") != null);
             long cap = SystemClock.elapsedRealtime();
+            expect("cap covers the white fixture with black pixels", visibleDim(target) >= .98f);
             report.putLong("full_screen_ms", cap - start);
             // On this profile, each 1 s of active fade earns 0.8 s of rest. A pause of p
             // seconds postpones the limit by the pause itself plus p / 0.8 s of resumed use.
@@ -306,19 +314,200 @@ public final class ChildgramBreakInstrumentation extends Instrumentation {
         }
     }
 
-    private float dimAmount() {
-        ChildgramBreakOverlay layer = overlay();
-        return layer == null ? 0 : ((WindowManager.LayoutParams) layer.getLayoutParams()).dimAmount;
+    private float visibleDim(View whiteSurface) throws Exception {
+        Rect area = main(() -> bounds(whiteSurface));
+        Bitmap screen = getUiAutomation().takeScreenshot();
+        expect("compositor returned a frame of the fixture", screen != null && area.intersect(0, 0, screen.getWidth(), screen.getHeight()));
+        try {
+            // The moving bubble may cross one edge. Both sample points are on a solid white background.
+            int y = area.bottom - Math.max(1, area.height() / 8);
+            int left = screen.getPixel(area.left + area.width() / 8, y);
+            int right = screen.getPixel(area.right - area.width() / 8, y);
+            return 1f - Math.max(Color.green(left), Color.green(right)) / 255f;
+        } finally { screen.recycle(); }
     }
 
-    private void checks() throws Exception {
+    private float awaitDim(String label, View surface, float min, float max) throws Exception {
+        mark(label);
+        long deadline = SystemClock.uptimeMillis() + 4000;
+        float dim;
+        do {
+            dim = visibleDim(surface);
+            if (dim >= min && dim <= max) { assertions++; return dim; }
+            SystemClock.sleep(100);
+        } while (SystemClock.uptimeMillis() < deadline);
+        throw new AssertionError(label + " (measured " + dim + ")");
+    }
+
+    private static final class InputFixture extends LinearLayout {
+        final ScrollView scroll;
+        final Button button;
+        final EditText editor;
+        final View white;
+        int clicks;
+
+        InputFixture(Context context) {
+            super(context);
+            setOrientation(VERTICAL);
+            setBackgroundColor(Color.WHITE);
+            setFocusableInTouchMode(true);
+            scroll = new ScrollView(context);
+            TextView text = new TextView(context);
+            text.setText("Childgram\n\nTouch and keyboard test");
+            text.setTextColor(Color.BLACK);
+            text.setMinHeight(AndroidUtilities.dp(3000));
+            scroll.addView(text);
+            addView(scroll, new LayoutParams(-1, 0, 1));
+            button = new Button(context);
+            button.setText("Test button");
+            button.setOnClickListener(v -> clicks++);
+            addView(button, -1, AndroidUtilities.dp(56));
+            editor = new EditText(context);
+            editor.setSingleLine(true);
+            editor.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+            editor.setHint("Test input");
+            addView(editor, -1, AndroidUtilities.dp(52));
+            white = new View(context);
+            white.setBackgroundColor(Color.WHITE);
+            addView(white, -1, AndroidUtilities.dp(20));
+            requestFocus();
+        }
+    }
+
+    private boolean checkPartialInput(String host, InputFixture fixture, View root, Bundle report) throws Exception {
+        main(() -> { ChildgramParentalSettings.setBreakReminderEnabled(false); return null; });
+        await(host + " has an undimmed input fixture", () -> overlay() == null && root.hasWindowFocus() && fixture.white.getHeight() > 0);
+        awaitDim(host + " white calibration surface", fixture.white, 0f, .04f);
+        seed(2_790_000); // About 83%, with over 50 seconds before reaching the cap.
+        await(host + " displays its partial reminder", () -> hostIs(root) && button("ChildgramBreakPrompt") != null);
+        float dim = awaitDim(host + " white pixels actually dim over 80 percent", fixture.white, .80f, .98f);
+        report.putFloat(host + "_visible_dim", dim);
+        boolean dimBehind = main(() -> (((WindowManager.LayoutParams) overlay().getLayoutParams()).flags
+                & WindowManager.LayoutParams.FLAG_DIM_BEHIND) != 0);
+        report.putBoolean(host + "_childgram_dim_behind", dimBehind);
+
+        Rect area = main(() -> bounds(fixture.button));
+        tap(area.right - area.width() / 8, area.centerY());
+        await(host + " receives a tap under heavy dimming", () -> fixture.clicks == 1);
+        area = main(() -> bounds(fixture.scroll));
+        int x = area.right - area.width() / 8;
+        gesture(x, area.bottom - area.height() / 5, x, area.centerY());
+        await(host + " receives a scroll gesture under heavy dimming", () -> fixture.scroll.getScrollY() > 0);
+
+        Rect bubble = main(() -> bounds(overlay()));
+        int distance = Math.min(160, area.height() / 4);
+        gesture(bubble.centerX(), bubble.centerY(), bubble.centerX(), bubble.centerY() + distance);
+        await(host + " reminder moves independently", () -> button("ChildgramBreakPrompt") != null
+                && bounds(overlay()).centerY() > bubble.centerY() + distance / 2);
+
+        area = main(() -> bounds(fixture.editor));
+        tap(area.right - area.width() / 8, area.centerY());
+        InputMethodManager ime = (InputMethodManager) getTargetContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+        await(host + " editor owns the active IME", 6000, () -> fixture.editor.hasFocus() && ime.isActive(fixture.editor)
+                && fixture.editor.getRootWindowInsets().isVisible(WindowInsets.Type.ime()));
+        AccessibilityServiceInfo info = getUiAutomation().getServiceInfo();
+        if ((info.flags & AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS) == 0) {
+            info.flags |= AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
+            getUiAutomation().setServiceInfo(info);
+        }
+        Rect keys = new Rect();
+        Rect previous = new Rect();
+        long[] unchangedSince = {0};
+        await(host + " system keyboard is visible and its key bounds have settled", 6000, () -> {
+            if (!fixture.editor.hasFocus() || !ime.isActive(fixture.editor)) return false;
+            WindowMetrics metrics = ((Activity) (Object) LaunchActivity.instance).getWindowManager().getCurrentWindowMetrics();
+            Rect task = metrics.getBounds();
+            WindowInsets insets = fixture.editor.getRootWindowInsets();
+            if (!insets.isVisible(WindowInsets.Type.ime())) return false;
+            Rect visible = new Rect();
+            root.getWindowVisibleDisplayFrame(visible);
+            int bottom = task.bottom - insets.getInsets(WindowInsets.Type.navigationBars()).bottom;
+            int imeHeight = Math.max(insets.getInsets(WindowInsets.Type.ime()).bottom,
+                    metrics.getWindowInsets().getInsets(WindowInsets.Type.ime()).bottom);
+            int top = Math.min(task.bottom - imeHeight, visible.bottom);
+            Rect usableScreen = new Rect(task.left, task.top, task.right, bottom);
+            keys.set(task.left, top, task.right, bottom);
+            Rect accessible = new Rect();
+            for (AccessibilityWindowInfo window : getUiAutomation().getWindows()) {
+                if (window.getType() == AccessibilityWindowInfo.TYPE_INPUT_METHOD) {
+                    window.getBoundsInScreen(accessible);
+                    break;
+                }
+            }
+            // The accessibility window may already report its full size while still below the
+            // display during the slide-in animation. Prefer the IME area reported to the editor.
+            String source = "insets";
+            if (!usableKeyboard(keys, usableScreen)) {
+                source = "window";
+                if (!keys.setIntersect(accessible, usableScreen) || !usableKeyboard(keys, usableScreen)) {
+                    source = "previous";
+                    if (lastKeyboardTask.equals(task)) keys.set(lastWorkingKeyboard);
+                    else keys.setEmpty();
+                }
+            }
+            report.putString(host + "_ime_bounds", "window=" + accessible.toShortString() + ", visible="
+                    + visible.toShortString() + ", insets=" + insets.getInsets(WindowInsets.Type.ime()).bottom
+                    + ", keys=" + keys.toShortString() + ", source=" + source);
+            long now = SystemClock.uptimeMillis();
+            if (!keys.equals(previous)) {
+                previous.set(keys);
+                unchangedSince[0] = now;
+            }
+            return usableKeyboard(keys, usableScreen) && now - unchangedSince[0] >= 500;
+        });
+        // A real touch on an alphabetic key in the middle row. Never inspect suggestions or saved text.
+        int keyX = keys.centerX(), keyY = keys.top + keys.height() / 2;
+        long down = SystemClock.uptimeMillis();
+        for (int action : new int[]{MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP}) {
+            MotionEvent event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), action, keyX, keyY, 0);
+            event.setSource(InputDevice.SOURCE_TOUCHSCREEN);
+            try {
+                expect(host + " IME receives injected touch", input.submit(() -> getUiAutomation().injectInputEvent(event, true)).get(8, TimeUnit.SECONDS));
+            } finally { event.recycle(); }
+        }
+        await(host + " real IME key inserts a letter in the fixture", 5000, () -> fixture.editor.length() > 0
+                && Character.isLetter(Character.codePointAt(fixture.editor.getText(), 0)));
+        lastWorkingKeyboard.set(keys);
+        lastKeyboardTask.set(((Activity) (Object) LaunchActivity.instance).getWindowManager().getCurrentWindowMetrics().getBounds());
+        report.putBoolean(host + "_heavy_dim_input_ok", true);
+        main(() -> { ime.hideSoftInputFromWindow(fixture.editor.getWindowToken(), 0); return null; });
+        await(host + " closes the keyboard", () -> !fixture.editor.getRootWindowInsets().isVisible(WindowInsets.Type.ime()));
+        return dimBehind;
+    }
+
+    private static boolean usableKeyboard(Rect keys, Rect screen) {
+        return screen.contains(keys) && keys.width() >= screen.width() / 2
+                && keys.height() >= AndroidUtilities.dp(96) && keys.top > screen.top + screen.height() / 4;
+    }
+
+    private void checks(Bundle report) throws Exception {
+        Activity activity = (Activity) (Object) LaunchActivity.instance;
+        await("neutral Telegram screen is ready", () -> currentFragment() == timingScreen && timingScreen.getFragmentView() instanceof InputFixture
+                && timingScreen.getFragmentView().getHeight() > 0);
+        InputFixture page = main(() -> (InputFixture) timingScreen.getFragmentView());
+        boolean pageUsesWindowDim = checkPartialInput("activity", page, activity.getWindow().getDecorView(), report);
+        InputFixture modal = main(() -> {
+            dialog = new Dialog(activity);
+            dialog.setOwnerActivity(activity);
+            InputFixture content = new InputFixture(activity);
+            dialog.setContentView(content);
+            dialog.show();
+            dialog.getWindow().setLayout(-1, -1);
+            return content;
+        });
+        boolean dialogUsesWindowDim = checkPartialInput("dialog", modal, dialog.getWindow().getDecorView(), report);
+        mark("checking system dim flags after both hosts passed input checks");
+        expect("partial Childgram windows must not request system DIM_BEHIND", !pageUsesWindowDim && !dialogUsesWindowDim);
+        main(() -> { dialog.dismiss(); showFixture(activity); return null; });
         seed(1_800_000); // 15 active minutes.
         await("soft reminder attaches to the dialog", () -> hostIs(dialog.getWindow().getDecorView())
                 && button("ChildgramBreakPrompt") != null && bounds(target).height() > 200);
         expect("enabled preference stored", settings.getBoolean("break_reminder", false));
-        float dim = main(() -> ((WindowManager.LayoutParams) overlay().getLayoutParams()).dimAmount);
-        expect("15 minutes dims the real window by 25 percent", Math.abs(dim - 0.25f) < 0.025f);
+        float dim = awaitDim("15 minutes dims actual white fixture pixels by 25 percent", target, .21f, .29f);
         screenshot("soft");
+        mark("checking composited video under the break filter");
+        assertions += ChildgramBreakSurfaceCheck.run(this, activity, dim);
+        await("soft reminder returns to the fixture after video", () -> hostIs(dialog.getWindow().getDecorView()));
         Rect sheet = main(() -> bounds(target));
         int x = sheet.centerX(), y = sheet.bottom - sheet.height() / 8;
         tap(x, y);
@@ -352,7 +541,6 @@ public final class ChildgramBreakInstrumentation extends Instrumentation {
         }
         expect("releasing the earlier tap cannot click hidden content", touches.get() == 1);
         main(() -> {
-            Activity activity = (Activity) (Object) LaunchActivity.instance;
             viewer = new View(activity);
             WindowManager.LayoutParams params = new WindowManager.LayoutParams(-1, -1,
                     WindowManager.LayoutParams.LAST_APPLICATION_WINDOW, 0, PixelFormat.OPAQUE);
@@ -518,7 +706,11 @@ public final class ChildgramBreakInstrumentation extends Instrumentation {
     private void gesture(int x, int y, int endX, int endY) throws Exception {
         long down = SystemClock.uptimeMillis();
         pointer(down, MotionEvent.ACTION_DOWN, x, y);
-        if (x != endX || y != endY) pointer(down, MotionEvent.ACTION_MOVE, endX, endY);
+        if (x != endX || y != endY) {
+            pointer(down, MotionEvent.ACTION_MOVE, (x + endX) / 2, (y + endY) / 2);
+            SystemClock.sleep(40);
+            pointer(down, MotionEvent.ACTION_MOVE, endX, endY);
+        }
         pointer(down, MotionEvent.ACTION_UP, endX, endY);
         main(() -> null);
     }

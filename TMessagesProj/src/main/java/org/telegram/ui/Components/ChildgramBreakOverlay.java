@@ -5,7 +5,10 @@ import android.app.Activity;
 import android.content.Context;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffXfermode;
 import android.graphics.Rect;
+import android.graphics.drawable.ShapeDrawable;
 import android.os.Build;
 import android.os.SystemClock;
 import android.text.format.DateUtils;
@@ -13,8 +16,10 @@ import android.view.Gravity;
 import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
+import android.view.SurfaceView;
 import android.view.View;
 import android.view.ViewConfiguration;
+import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityManager;
 import android.widget.Button;
@@ -32,6 +37,8 @@ import org.telegram.ui.GroupCallActivity;
 import org.telegram.ui.Components.voip.VoIPWindowView;
 
 import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
@@ -41,7 +48,7 @@ import static android.view.ViewGroup.LayoutParams.WRAP_CONTENT;
 import static org.telegram.messenger.AndroidUtilities.dp;
 import static org.telegram.messenger.LocaleController.getString;
 
-/** An app subwindow. Android dims everything behind the small, otherwise non-modal bubble. */
+/** Draw soft shades in existing windows. Only the bubble itself receives input until full rest. */
 public final class ChildgramBreakOverlay extends LinearLayout {
     private static ChildgramBreakOverlay current;
     private final Activity activity;
@@ -50,6 +57,7 @@ public final class ChildgramBreakOverlay extends LinearLayout {
     private final WindowManager.LayoutParams params;
     private final boolean full, resting;
     private final Map<View, Integer> hiddenFromAccessibility = new WeakHashMap<>();
+    private final Map<View, Shade> shades = new IdentityHashMap<>();
     private final TextView prompt, time;
     private final Rect visibleFrame = new Rect();
     private long shownSeconds = -1, lastMove;
@@ -100,7 +108,6 @@ public final class ChildgramBreakOverlay extends LinearLayout {
             hide();
             ChildgramBreakOverlay next = new ChildgramBreakOverlay(owner, parent, full, resting);
             next.setTime(remainingMillis);
-            next.params.dimAmount = alpha;
             try {
                 if (full) AndroidUtilities.hideKeyboard(parent.findFocus() == null ? parent : parent.findFocus());
                 next.manager.addView(next, next.params);
@@ -112,11 +119,8 @@ public final class ChildgramBreakOverlay extends LinearLayout {
             }
         } else {
             current.setTime(remainingMillis);
-            if (current.params.dimAmount != alpha) {
-                current.params.dimAmount = alpha;
-                current.applyPosition();
-            }
         }
+        if (current != null && !full) current.shadeWindows(roots, Math.round(alpha * 255));
         if (current != null && full) {
             for (View root : roots) {
                 if (root instanceof ChildgramBreakOverlay || !root.isAttachedToWindow() || !(belongsTo(root, owner)
@@ -153,10 +157,81 @@ public final class ChildgramBreakOverlay extends LinearLayout {
                 && layout.token == ((WindowManager.LayoutParams) decor.getLayoutParams()).token;
     }
 
+    private static final class Shade extends ShapeDrawable implements View.OnLayoutChangeListener {
+        boolean seen;
+
+        Shade(View host, PorterDuff.Mode mode) {
+            getPaint().setColor(Color.BLACK);
+            getPaint().setXfermode(new PorterDuffXfermode(mode));
+            setBounds(0, 0, host.getWidth(), host.getHeight());
+            host.addOnLayoutChangeListener(this);
+            host.getOverlay().add(this);
+        }
+
+        @Override public void onLayoutChange(View v, int l, int t, int r, int b, int ol, int ot, int or, int ob) {
+            setBounds(0, 0, r - l, b - t);
+        }
+
+        void remove(View host) {
+            host.getOverlay().remove(this);
+            host.removeOnLayoutChangeListener(this);
+        }
+    }
+
+    private void shadeWindows(List<View> roots, int alpha) {
+        View decor = activity.getWindow().getDecorView();
+        for (Shade shade : shades.values()) shade.seen = false;
+        for (View root : roots) {
+            if (root instanceof ChildgramBreakOverlay || !root.isShown() || root.getWindowVisibility() != VISIBLE
+                    || !(root.getLayoutParams() instanceof WindowManager.LayoutParams)) continue;
+            int type = ((WindowManager.LayoutParams) root.getLayoutParams()).type;
+            if (type < WindowManager.LayoutParams.FIRST_APPLICATION_WINDOW || type > WindowManager.LayoutParams.LAST_SUB_WINDOW
+                    || !(belongsTo(root, activity) || root.getApplicationWindowToken() == parentWindow.getWindowToken())) continue;
+            // On translucent dialogs, SRC_ATOP darkens their pixels and preserves their alpha:
+            // the underlying chat is already shaded once in its own window.
+            shade(root, root == decor || root instanceof SurfaceView ? PorterDuff.Mode.SRC_OVER : PorterDuff.Mode.SRC_ATOP, alpha);
+            if (root != decor && root instanceof ViewGroup) shadeVideoSurfaces(root, alpha);
+        }
+        Iterator<Map.Entry<View, Shade>> it = shades.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<View, Shade> entry = it.next();
+            if (!entry.getValue().seen) {
+                entry.getValue().remove(entry.getKey());
+                it.remove();
+            }
+        }
+    }
+
+    private void shadeVideoSurfaces(View view, int alpha) {
+        if (view instanceof SurfaceView) {
+            // Video is composed below its window. Tint the transparent hole after SurfaceView
+            // punches it, beneath any player controls. TextureViews are already part of the window.
+            shade(view, PorterDuff.Mode.DST_OVER, alpha);
+        } else if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                View child = group.getChildAt(i);
+                if (child.getVisibility() == VISIBLE) shadeVideoSurfaces(child, alpha);
+            }
+        }
+    }
+
+    private void shade(View view, PorterDuff.Mode mode, int alpha) {
+        Shade shade = shades.get(view);
+        if (shade == null) {
+            shade = new Shade(view, mode);
+            shades.put(view, shade);
+        }
+        shade.seen = true;
+        shade.setAlpha(alpha);
+    }
+
     public static void hide() {
         ChildgramBreakOverlay previous = current;
         if (previous == null) return;
         current = null;
+        for (Map.Entry<View, Shade> entry : previous.shades.entrySet()) entry.getValue().remove(entry.getKey());
+        previous.shades.clear();
         for (Map.Entry<View, Integer> entry : previous.hiddenFromAccessibility.entrySet()) {
             if (entry.getKey().getImportantForAccessibility() == IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS) {
                 entry.getKey().setImportantForAccessibility(entry.getValue());
@@ -181,14 +256,14 @@ public final class ChildgramBreakOverlay extends LinearLayout {
         manager = owner.getWindowManager();
         int size = full ? MATCH_PARENT : WRAP_CONTENT;
         // Use task bounds even when attached to a floating video or narrow dialog.
-        int flags = WindowManager.LayoutParams.FLAG_DIM_BEHIND | WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM
-                | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
+        int flags = WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
         if (!full) flags |= WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL;
         params = new WindowManager.LayoutParams(size, size, WindowManager.LayoutParams.TYPE_APPLICATION_SUB_PANEL, flags, PixelFormat.TRANSLUCENT);
+        params.dimAmount = 0;
         params.token = parentWindow.getWindowToken();
         params.setTitle("Childgram break");
         params.gravity = full ? Gravity.CENTER : Gravity.TOP | Gravity.LEFT;
-        params.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN;
+        params.softInputMode = full ? WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN : WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED;
         setOrientation(VERTICAL);
         setGravity(Gravity.CENTER);
         setPadding(dp(16), dp(10), dp(16), dp(10));
