@@ -17,7 +17,6 @@ import android.os.Looper;
 import android.os.PowerManager;
 import android.os.SystemClock;
 import android.provider.Settings;
-import android.text.format.DateUtils;
 import android.util.Log;
 import android.view.InputDevice;
 import android.view.MotionEvent;
@@ -254,12 +253,8 @@ public final class ChildgramBreakInstrumentation extends Instrumentation {
             // seconds postpones the limit by the pause itself plus p / 0.8 s of resumed use.
             long expected = start + 120_000 + Math.round(2.25 * away);
             expect("full screen arrives at the configured limit adjusted for the short break", Math.abs(cap - expected) <= 4500);
-            await("waiting for one full minute of real recovery", 70_000, () -> {
-                if (button("ChildgramBreakContinue") == null) return false;
-                int string = getTargetContext().getResources().getIdentifier("ChildgramBreakTimeLeft", "string", getTargetContext().getPackageName());
-                return LocaleController.formatString(string, DateUtils.formatElapsedTime(0)).contentEquals(
-                        ((TextView) overlay().getChildAt(1)).getText());
-            });
+            await("waiting for one full minute of real recovery", 70_000, () ->
+                    button("ChildgramBreakReady") != null && button("ChildgramBreakContinue") != null);
             long recovery = SystemClock.elapsedRealtime() - cap;
             report.putLong("full_reset_ms", recovery);
             expect("full recovery takes one minute", recovery >= 58_000 && recovery <= 64_000);
