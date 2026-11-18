@@ -3,11 +3,15 @@ package org.telegram.ui.Components;
 import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.content.Context;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.PixelFormat;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
 import android.graphics.Rect;
+import android.graphics.Region;
 import android.graphics.drawable.ShapeDrawable;
 import android.os.Build;
 import android.os.SystemClock;
@@ -20,6 +24,7 @@ import android.view.SurfaceView;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityManager;
 import android.widget.Button;
@@ -36,11 +41,13 @@ import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.GroupCallActivity;
 import org.telegram.ui.Components.voip.VoIPWindowView;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.WeakHashMap;
 
 import static android.view.ViewGroup.LayoutParams.MATCH_PARENT;
@@ -58,6 +65,7 @@ public final class ChildgramBreakOverlay extends LinearLayout {
     private final boolean full, resting;
     private final Map<View, Integer> hiddenFromAccessibility = new WeakHashMap<>();
     private final Map<View, Shade> shades = new IdentityHashMap<>();
+    private final Set<SurfaceView> changedSurfaces = Collections.newSetFromMap(new WeakHashMap<>());
     private final TextView prompt, time;
     private final Rect visibleFrame = new Rect();
     private long shownSeconds = -1, lastMove;
@@ -157,15 +165,48 @@ public final class ChildgramBreakOverlay extends LinearLayout {
                 && layout.token == ((WindowManager.LayoutParams) decor.getLayoutParams()).token;
     }
 
-    private static final class Shade extends ShapeDrawable implements View.OnLayoutChangeListener {
+    private static final class Shade extends ShapeDrawable implements View.OnLayoutChangeListener, ViewTreeObserver.OnPreDrawListener {
         boolean seen;
+        final ArrayList<SurfaceView> videos = new ArrayList<>();
+        final Region region = new Region(), lastRegion = new Region();
+        final Rect visible = new Rect();
+        final Path holes = new Path();
+        final Paint holePaint = new Paint();
 
         Shade(View host, PorterDuff.Mode mode) {
             getPaint().setColor(Color.BLACK);
             getPaint().setXfermode(new PorterDuffXfermode(mode));
+            holePaint.setColor(Color.BLACK);
+            holePaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_OVER));
             setBounds(0, 0, host.getWidth(), host.getHeight());
             host.addOnLayoutChangeListener(this);
+            host.getViewTreeObserver().addOnPreDrawListener(this);
             host.getOverlay().add(this);
+        }
+
+        @Override public boolean onPreDraw() {
+            if (videos.isEmpty() && lastRegion.isEmpty()) return true;
+            region.setEmpty();
+            for (SurfaceView video : videos) {
+                // getGlobalVisibleRect is in the root view's coordinate system, clipped by ancestors.
+                if (video.isShown() && video.getGlobalVisibleRect(visible)) region.op(visible, Region.Op.UNION);
+            }
+            region.op(getBounds(), Region.Op.INTERSECT);
+            if (!lastRegion.equals(region)) {
+                lastRegion.set(region);
+                holes.reset();
+                region.getBoundaryPath(holes);
+                invalidateSelf();
+            }
+            return true;
+        }
+
+        @Override public void draw(Canvas canvas) {
+            super.draw(canvas);
+            if (!holes.isEmpty()) {
+                holePaint.setAlpha(getAlpha());
+                canvas.drawPath(holes, holePaint);
+            }
         }
 
         @Override public void onLayoutChange(View v, int l, int t, int r, int b, int ol, int ot, int or, int ob) {
@@ -175,6 +216,7 @@ public final class ChildgramBreakOverlay extends LinearLayout {
         void remove(View host) {
             host.getOverlay().remove(this);
             host.removeOnLayoutChangeListener(this);
+            if (host.getViewTreeObserver().isAlive()) host.getViewTreeObserver().removeOnPreDrawListener(this);
         }
     }
 
@@ -189,8 +231,17 @@ public final class ChildgramBreakOverlay extends LinearLayout {
                     || !(belongsTo(root, activity) || root.getApplicationWindowToken() == parentWindow.getWindowToken())) continue;
             // On translucent dialogs, SRC_ATOP darkens their pixels and preserves their alpha:
             // the underlying chat is already shaded once in its own window.
-            shade(root, root == decor || root instanceof SurfaceView ? PorterDuff.Mode.SRC_OVER : PorterDuff.Mode.SRC_ATOP, alpha);
-            if (root != decor && root instanceof ViewGroup) shadeVideoSurfaces(root, alpha);
+            boolean base = root == decor || root instanceof SurfaceView;
+            Shade shade = shades.get(root);
+            if (shade == null) {
+                shade = new Shade(root, base ? PorterDuff.Mode.SRC_OVER : PorterDuff.Mode.SRC_ATOP);
+                shades.put(root, shade);
+            }
+            shade.seen = true;
+            shade.setAlpha(alpha);
+            shade.videos.clear();
+            findVideoSurfaces(root, base ? null : shade.videos);
+            shade.onPreDraw();
         }
         Iterator<Map.Entry<View, Shade>> it = shades.entrySet().iterator();
         while (it.hasNext()) {
@@ -202,28 +253,28 @@ public final class ChildgramBreakOverlay extends LinearLayout {
         }
     }
 
-    private void shadeVideoSurfaces(View view, int alpha) {
+    private void findVideoSurfaces(View view, List<SurfaceView> holes) {
         if (view instanceof SurfaceView) {
-            // Video is composed below its window. Tint the transparent hole after SurfaceView
-            // punches it, beneath any player controls. TextureViews are already part of the window.
-            shade(view, PorterDuff.Mode.DST_OVER, alpha);
+            SurfaceView video = (SurfaceView) view;
+            // A default SurfaceView tells SurfaceFlinger to ignore this rectangle in the window
+            // buffer. The buffer now contains a translucent shade over the separate video surface.
+            if (video.willNotDraw()) {
+                changedSurfaces.add(video);
+                setSurfaceDrawing(video, true);
+            }
+            if (holes != null) holes.add(video);
         } else if (view instanceof ViewGroup) {
             ViewGroup group = (ViewGroup) view;
             for (int i = 0; i < group.getChildCount(); i++) {
                 View child = group.getChildAt(i);
-                if (child.getVisibility() == VISIBLE) shadeVideoSurfaces(child, alpha);
+                if (child.getVisibility() == VISIBLE) findVideoSurfaces(child, holes);
             }
         }
     }
 
-    private void shade(View view, PorterDuff.Mode mode, int alpha) {
-        Shade shade = shades.get(view);
-        if (shade == null) {
-            shade = new Shade(view, mode);
-            shades.put(view, shade);
-        }
-        shade.seen = true;
-        shade.setAlpha(alpha);
+    private static void setSurfaceDrawing(SurfaceView view, boolean drawing) {
+        view.setWillNotDraw(!drawing);
+        if (view.getParent() != null) view.getParent().requestTransparentRegion(view);
     }
 
     public static void hide() {
@@ -232,6 +283,8 @@ public final class ChildgramBreakOverlay extends LinearLayout {
         current = null;
         for (Map.Entry<View, Shade> entry : previous.shades.entrySet()) entry.getValue().remove(entry.getKey());
         previous.shades.clear();
+        for (SurfaceView view : previous.changedSurfaces) setSurfaceDrawing(view, false);
+        previous.changedSurfaces.clear();
         for (Map.Entry<View, Integer> entry : previous.hiddenFromAccessibility.entrySet()) {
             if (entry.getKey().getImportantForAccessibility() == IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS) {
                 entry.getKey().setImportantForAccessibility(entry.getValue());

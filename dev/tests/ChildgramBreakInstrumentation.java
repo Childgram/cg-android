@@ -295,7 +295,7 @@ public final class ChildgramBreakInstrumentation extends Instrumentation {
 
             await("waiting for the real cap", 55_000, () -> button("ChildgramBreakContinue") != null);
             long cap = SystemClock.elapsedRealtime();
-            expect("cap covers the white fixture with black pixels", visibleDim(target) >= .98f);
+            awaitDim("cap covers the white fixture with black pixels", target, .98f, 1f);
             report.putLong("full_screen_ms", cap - start);
             // On this profile, each 1 s of active fade earns 0.8 s of rest. A pause of p
             // seconds postpones the limit by the pause itself plus p / 0.8 s of resumed use.
@@ -309,6 +309,7 @@ public final class ChildgramBreakInstrumentation extends Instrumentation {
             tapButton("ChildgramBreakContinue");
             await("return after full recovery shows an undimmed fixture", () -> overlay() == null
                     && currentFragment() == timingScreen && decor.hasWindowFocus());
+            awaitDim("white fixture pixels return after a full break", target, 0f, .04f);
         } finally {
             if (awake.isHeld()) awake.release();
         }
