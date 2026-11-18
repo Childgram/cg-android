@@ -1693,6 +1693,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
             isInline = true;
             ensurePipSession();
             final PipTextureView target = pipSession.startFloating(parentActivity, placeholder, !pipVideoOverlayAnimateFlag);
+            org.telegram.messenger.ChildgramBreakController.rememberPipTarget(target);
             changedTextureView = target;
             pipVideoOverlayAnimateFlag = true;
 
@@ -18883,6 +18884,15 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
         return message != null ? message : Instance == null ? null : Instance.childgramPipVideoMessage();
     }
 
+    public static void pauseChildgramBreakVideo() {
+        if (PipInstance != null) PipInstance.pauseChildgramMessageVideo();
+        if (Instance != null && Instance != PipInstance) Instance.pauseChildgramMessageVideo();
+    }
+
+    private void pauseChildgramMessageVideo() {
+        if (isChildgramVideoPlaying() || childgramPipVideoMessage() != null) pauseVideoOrWeb();
+    }
+
     /** Keep usage polling while PiP exists, including pause, buffering, screen lock and stashing. */
     public static boolean hasChildgramPipVideo() {
         return PipInstance != null && PipInstance.hasChildgramPipVideoSession()
@@ -23838,6 +23848,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
 
         @Override
         public void releasePrimary(@NonNull PipTextureView target) {
+            org.telegram.messenger.ChildgramBreakController.rememberPipTarget(target);
             pipPrimaryHidden = true;
             if (usedSurfaceView) {
                 if (videoPlayer != null) {

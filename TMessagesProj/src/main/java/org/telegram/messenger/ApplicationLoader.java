@@ -364,6 +364,15 @@ public class ApplicationLoader extends Application {
             }
 
             @Override
+            public void onActivityStopped(Activity activity) {
+                super.onActivityStopped(activity);
+                if (BuildVars.CHILDGRAM && isBackground() && !activity.isChangingConfigurations()
+                        && ChildgramUsageTracker.isBreakContentActivity(activity)) {
+                    ChildgramBreakController.onBackground();
+                }
+            }
+
+            @Override
             public void onActivityDestroyed(Activity activity) {
                 super.onActivityDestroyed(activity);
                 ChildgramUsageTracker.onActivityVisibilityChanged(activity, false);

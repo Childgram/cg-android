@@ -17,6 +17,8 @@ import javax.crypto.spec.PBEKeySpec;
 /** Device-wide parental settings, independent of Telegram's app lock and accounts. */
 public final class ChildgramParentalSettings {
     private static final long MAX_RETRY_MS = 60 * 60 * 1000;
+    private static final String BREAK_START = "break_start_minutes", BREAK_FADE = "break_fade_minutes", BREAK_REST = "break_rest_minutes";
+    public static final int MAX_BREAK_MINUTES = 240;
 
     private ChildgramParentalSettings() {
     }
@@ -43,6 +45,37 @@ public final class ChildgramParentalSettings {
 
     public static boolean blockWidgets() {
         return BuildVars.CHILDGRAM && (!hasPin() || preferences().getBoolean("block_widgets", true));
+    }
+
+    public static boolean isBreakReminderEnabled() {
+        return BuildVars.CHILDGRAM && preferences().getBoolean("break_reminder", false);
+    }
+
+    public static void setBreakReminderEnabled(boolean enabled) {
+        preferences().edit().putBoolean("break_reminder", enabled).apply();
+        ChildgramUsageTracker.refreshVisibleScreen();
+    }
+
+    public static int getBreakStartMinutes() { return breakMinutes(BREAK_START, 10); }
+    public static int getBreakFadeMinutes() { return breakMinutes(BREAK_FADE, 10); }
+    public static int getBreakRestMinutes() { return breakMinutes(BREAK_REST, 5); }
+
+    public static boolean setBreakStartMinutes(int minutes) { return setBreakMinutes(BREAK_START, minutes, getBreakStartMinutes()); }
+    public static boolean setBreakFadeMinutes(int minutes) { return setBreakMinutes(BREAK_FADE, minutes, getBreakFadeMinutes()); }
+    public static boolean setBreakRestMinutes(int minutes) { return setBreakMinutes(BREAK_REST, minutes, getBreakRestMinutes()); }
+
+    private static int breakMinutes(String key, int fallback) {
+        int minutes = preferences().getInt(key, fallback);
+        return minutes >= 1 && minutes <= MAX_BREAK_MINUTES ? minutes : fallback;
+    }
+
+    private static boolean setBreakMinutes(String key, int minutes, int current) {
+        if (minutes < 1 || minutes > MAX_BREAK_MINUTES) return false;
+        if (minutes != current) {
+            preferences().edit().putInt(key, minutes).apply();
+            ChildgramUsageTracker.onBreakTimingsChanged();
+        }
+        return true;
     }
 
     public static synchronized void setBlockWidgets(boolean block) {

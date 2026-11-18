@@ -3,9 +3,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 if ! [[ $# == 0 ||
-        ($# == 1 && ($1 == --device || $1 == --usage-device || $1 == --usage-ui-device || $1 == --bubble-device)) ||
+        ($# == 1 && ($1 == --device || $1 == --usage-device || $1 == --usage-ui-device || $1 == --bubble-device || $1 == --break-device || $1 == --break-timing-device)) ||
         ($# == 2 && $1 == --pip-device && ($2 == system || $2 == overlay)) ]]; then
-    echo 'Usage: ./dev/check [--device | --usage-device | --usage-ui-device | --bubble-device | --pip-device {system|overlay}]' >&2
+    echo 'Usage: ./dev/check [--device | --usage-device | --usage-ui-device | --bubble-device | --break-device | --break-timing-device | --pip-device {system|overlay}]' >&2
     exit 2
 fi
 
@@ -27,12 +27,14 @@ docker run --rm --init --platform linux/amd64 \
     mkdir -p "$out/classes" "$out/dex"
     javac -cp "$classes:$android" -d "$out/classes" dev/tests/*.java
     java -cp "$out/classes:$classes:$android" ChildgramUsageTimeTest
+    java -cp "$out/classes:$classes:$android" org.telegram.messenger.ChildgramBreakTimerTest
     java -cp "$out/classes:$classes:$android" org.telegram.messenger.ChildgramPrivacyRulesTest
     if [[ -f dev/tests/ChildgramAccessInstrumentation.java ]]; then
         cat > "$out/AndroidManifest.xml" <<EOF
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.childgram.tests">
     <application android:label="Childgram checks" android:debuggable="true" />
     <instrumentation android:name="org.telegram.messenger.ChildgramAccessInstrumentation" android:targetPackage="org.childgram.messenger.beta" />
+    <instrumentation android:name="org.telegram.messenger.ChildgramBreakInstrumentation" android:targetPackage="org.childgram.messenger.beta" />
 </manifest>
 EOF
         jar cf "$out/tests.jar" -C "$out/classes" .
@@ -49,12 +51,24 @@ EOF
 
 if (( $# > 0 )); then
     ./dev/emulator adb install -r .local/checks/childgram/tests.apk
-    args=(-e verify_usage true)
-    if [[ "${1:-}" == --device ]]; then args+=(-e verify_privacy true); else args+=(-e usage_only true); fi
-    if [[ "${1:-}" == --usage-ui-device ]]; then args+=(-e verify_usage_ui true); fi
-    if [[ "${1:-}" == --bubble-device ]]; then args+=(-e verify_bubble true); fi
-    if [[ "${1:-}" == --pip-device ]]; then args+=(-e verify_pip true -e pip_mode "$2"); fi
-    result=$(./dev/emulator adb shell am instrument -w "${args[@]}" org.childgram.tests/org.telegram.messenger.ChildgramAccessInstrumentation)
+    runner=ChildgramAccessInstrumentation
+    args=(-w)
+    if [[ "$1" == --break-device || "$1" == --break-timing-device ]]; then
+        runner=ChildgramBreakInstrumentation
+        if [[ "$1" == --break-timing-device ]]; then args+=(-e real_time true); fi
+    else
+        args+=(-e verify_usage true)
+        if [[ "$1" == --device ]]; then args+=(-e verify_privacy true); else args+=(-e usage_only true); fi
+        if [[ "$1" == --usage-ui-device ]]; then args+=(-e verify_usage_ui true); fi
+        if [[ "$1" == --bubble-device ]]; then args+=(-e verify_bubble true); fi
+        if [[ "$1" == --pip-device ]]; then args+=(-e verify_pip true -e pip_mode "$2"); fi
+    fi
+    result=$(./dev/emulator adb shell am instrument "${args[@]}" "org.childgram.tests/org.telegram.messenger.$runner")
     printf '%s\n' "$result"
-    [[ "$result" == *'INSTRUMENTATION_CODE: -1'* ]] && [[ "$result" == *'status=passed'* ]]
+    [[ "$result" == *'INSTRUMENTATION_CODE: -1'* && "$result" == *'status=passed'* ]]
+    if [[ "$1" == --break-device ]]; then
+        for name in soft rest; do
+            ./dev/emulator adb exec-out run-as org.childgram.messenger.beta cat "cache/childgram-break-$name.png" >".local/checks/childgram/break-$name.png"
+        done
+    fi
 fi

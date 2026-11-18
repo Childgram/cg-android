@@ -22,13 +22,17 @@ import org.telegram.ui.DataUsage2Activity;
 import org.telegram.ui.DataUsageActivity;
 import org.telegram.ui.DebugSettingsActivity;
 import org.telegram.ui.DialogsActivity;
+import org.telegram.ui.ExternalActionActivity;
 import org.telegram.ui.HeaderSettingsActivity;
 import org.telegram.ui.InviteContactsActivity;
+import org.telegram.ui.IntroActivity;
 import org.telegram.ui.LaunchActivity;
+import org.telegram.ui.LoginActivity;
 import org.telegram.ui.LiteModeSettingsActivity;
 import org.telegram.ui.NotificationsCustomSettingsActivity;
 import org.telegram.ui.NotificationsSettingsActivity;
 import org.telegram.ui.PhotoViewer;
+import org.telegram.ui.PopupNotificationActivity;
 import org.telegram.ui.PrivacyControlActivity;
 import org.telegram.ui.PrivacySettingsActivity;
 import org.telegram.ui.PrivacyUsersActivity;
@@ -39,6 +43,7 @@ import org.telegram.ui.RoundVideoSettingsActivity;
 import org.telegram.ui.SaveToGallerySettingsActivity;
 import org.telegram.ui.SessionsActivity;
 import org.telegram.ui.SettingsActivity;
+import org.telegram.ui.ShareActivity;
 import org.telegram.ui.ThemeActivity;
 import org.telegram.ui.TopicsFragment;
 import org.telegram.ui.TopicsNotifySettingsFragments;
@@ -47,6 +52,7 @@ import org.telegram.ui.ViewPagerActivity;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.BottomSheet;
 import org.telegram.ui.ActionBar.INavigationLayout;
+import org.telegram.ui.Components.ForegroundDetector;
 import org.telegram.ui.Components.Premium.GiftPremiumBottomSheet;
 import org.telegram.ui.Components.SharedMediaLayout;
 import org.telegram.ui.Gifts.AcquiredGiftsSheet;
@@ -100,7 +106,11 @@ public final class ChildgramUsageTracker {
     }
 
     static void onActivityVisibilityChanged(Activity activity, boolean resumed) {
-        if (!BuildVars.CHILDGRAM || !(activity instanceof LaunchActivity || activity instanceof BubbleActivity)) return;
+        if (!BuildVars.CHILDGRAM || !isBreakContentActivity(activity)) return;
+        if (!(activity instanceof LaunchActivity || activity instanceof BubbleActivity)) {
+            refreshVisibleScreen();
+            return;
+        }
         if (resumed && !activity.isFinishing() && !activity.isDestroyed()) {
             resumedActivities.add(activity);
             // The detector runs inside super.onResume(), before Telegram restores its chat.
@@ -109,6 +119,36 @@ public final class ChildgramUsageTracker {
             resumedActivities.remove(activity);
             update();
         }
+    }
+
+    public static boolean isBreakContentActivity(Activity activity) {
+        return activity != null && (activity instanceof LaunchActivity || activity instanceof BubbleActivity
+                || activity instanceof ShareActivity || activity instanceof PopupNotificationActivity
+                || activity.getClass() == ExternalActionActivity.class);
+    }
+
+    public static Activity getBreakActivity() {
+        ForegroundDetector detector = ForegroundDetector.getInstance();
+        Activity activity = detector == null ? null : detector.getForegroundActivity();
+        return isBreakContentActivity(activity) && !AndroidUtilities.isInPictureInPictureMode(activity) ? activity : null;
+    }
+
+    public static void startBreak() {
+        update();
+        ChildgramBreakController.setResting(true);
+        update();
+    }
+
+    public static void endBreak() {
+        update();
+        ChildgramBreakController.setResting(false);
+        update();
+    }
+
+    public static void onBreakTimingsChanged() {
+        if (!BuildVars.CHILDGRAM) return;
+        ChildgramBreakController.clear();
+        refreshVisibleScreen();
     }
 
     /** Coalesce nested fragment lifecycle events until the navigation stack has settled. */
@@ -159,9 +199,15 @@ public final class ChildgramUsageTracker {
         long utc = System.currentTimeMillis();
         session = updateSession(session, currentScreen(), utc, elapsed);
         pipSession = updateSession(pipSession, currentPip(), utc, elapsed);
+        Activity breakActivity = ChildgramParentalSettings.isBreakReminderEnabled() ? getBreakActivity() : null;
+        boolean visibleContent = breakActivity != null && isScreenAvailable();
+        BaseFragment fragment = visibleContent ? visibleFragment(breakActivity) : null;
+        boolean exempt = fragment instanceof ChildgramParentalActivity || fragment instanceof ChildgramParentalPinActivity
+                || fragment instanceof IntroActivity || fragment instanceof LoginActivity || ChildgramBreakCalls.isCallScreen(fragment);
+        ChildgramBreakController.update(elapsed, utc, visibleContent, pipSession != null, exempt);
         AndroidUtilities.cancelRunOnUIThread(tick);
         // Paused/hidden PiP still needs to notice screen unlock and the next visible playback.
-        if (foreground || PhotoViewer.hasChildgramPipVideo()) AndroidUtilities.runOnUIThread(tick, 1000);
+        if (foreground || breakActivity != null || PhotoViewer.hasChildgramPipVideo()) AndroidUtilities.runOnUIThread(tick, 1000);
     }
 
     private static Session updateSession(Session session, Session target, long utc, long elapsed) {
@@ -215,7 +261,7 @@ public final class ChildgramUsageTracker {
 
     private static Session currentScreen() {
         if (!foreground || !isScreenAvailable()) return null;
-        BaseFragment fragment = visibleFragment();
+        BaseFragment fragment = visibleFragment(null);
         if (fragment == null || fragment.isPaused()) return null;
         Activity activity = fragment.getParentActivity();
         if (activity == null || !resumedActivities.contains(activity)
@@ -311,14 +357,15 @@ public final class ChildgramUsageTracker {
                 && view.getGlobalVisibleRect(visibleRect) && !visibleRect.isEmpty();
     }
 
-    private static BaseFragment visibleFragment() {
-        if (BubbleActivity.instance != null && resumedActivities.contains(BubbleActivity.instance)
+    /** Null selects the foremost reporting fragment across both supported statistics windows. */
+    private static BaseFragment visibleFragment(Activity host) {
+        if ((host == null || host == BubbleActivity.instance) && BubbleActivity.instance != null && resumedActivities.contains(BubbleActivity.instance)
                 && BubbleActivity.instance.actionBarLayout != null) {
             BaseFragment bubble = top(BubbleActivity.instance.actionBarLayout);
             if (bubble != null && !bubble.isPaused()) return unwrap(bubble);
         }
         LaunchActivity launch = LaunchActivity.instance;
-        if (launch == null || !resumedActivities.contains(launch)) return null;
+        if (launch == null || host != null && host != launch || !resumedActivities.contains(launch)) return null;
         INavigationLayout main = launch.getActionBarLayout();
         BaseFragment fragment;
         if (main != launch.actionBarLayout && (fragment = top(main)) != null) return unwrap(fragment);

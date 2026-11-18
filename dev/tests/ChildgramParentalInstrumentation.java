@@ -5,13 +5,17 @@ import android.app.Instrumentation;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.view.View;
 import android.widget.FrameLayout;
+import android.widget.EditText;
 
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.INavigationLayout;
 import org.telegram.ui.ActionBar.BaseFragment;
+import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ChildgramParentalActivity;
 import org.telegram.ui.ChildgramParentalPinActivity;
 import org.telegram.ui.CodeFieldContainer;
@@ -31,6 +35,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 
 /** Local configuration only; invitation sync is exercised only with the restriction off. */
@@ -48,6 +53,8 @@ public final class ChildgramParentalInstrumentation extends Instrumentation {
         String failure = null;
         preferences = getTargetContext().getSharedPreferences("childgram_parental", Context.MODE_PRIVATE);
         Map<String, ?> original = new HashMap<>(preferences.getAll());
+        SharedPreferences clock = getTargetContext().getSharedPreferences("childgram_break_time", Context.MODE_PRIVATE);
+        Map<String, ?> originalClock = new HashMap<>(clock.getAll());
         try {
             expect("Childgram build required", BuildVars.CHILDGRAM);
             expect("clear local test fixture", preferences.edit().clear().commit());
@@ -64,11 +71,16 @@ public final class ChildgramParentalInstrumentation extends Instrumentation {
             // Never include stored values or exception messages that may contain user data.
             failure = error instanceof AssertionError ? error.getMessage() : error.getClass().getSimpleName();
         } finally {
-            if (!restore(original)) failure = "Could not restore original parental settings";
+            // Let the queued disable clear the test balance before restoring the original checkpoint.
+            runOnMainSync(() -> ChildgramParentalSettings.setBreakReminderEnabled(false));
+            runOnMainSync(() -> {});
+            if (!restore(clock, originalClock)) failure = "Could not restore original break timer";
+            if (!restore(preferences, original)) failure = "Could not restore original parental settings";
         }
         report.putString("status", failure == null ? "passed" : "failed");
         report.putInt("assertions", assertions);
         report.putBoolean("original_settings_restored", preferences.getAll().equals(original));
+        report.putBoolean("original_break_timer_restored", clock.getAll().equals(originalClock));
         if (failure != null) report.putString("failure", failure);
         finish(failure == null ? Activity.RESULT_OK : Activity.RESULT_CANCELED, report);
     }
@@ -253,6 +265,10 @@ public final class ChildgramParentalInstrumentation extends Instrumentation {
     }
 
     private void checkSettings() {
+        expect("default break durations", ChildgramParentalSettings.getBreakStartMinutes() == 10
+                && ChildgramParentalSettings.getBreakFadeMinutes() == 10 && ChildgramParentalSettings.getBreakRestMinutes() == 5);
+        expect("out-of-range break durations refused", !ChildgramParentalSettings.setBreakStartMinutes(0)
+                && !ChildgramParentalSettings.setBreakFadeMinutes(241) && !ChildgramParentalSettings.setBreakRestMinutes(Integer.MAX_VALUE));
         expect("all restrictions default on", ChildgramParentalSettings.blockChannels()
                 && ChildgramParentalSettings.blockGroups() && ChildgramParentalSettings.blockBots()
                 && ChildgramParentalSettings.blockInvites() && ChildgramParentalSettings.blockWidgets());
@@ -312,10 +328,19 @@ public final class ChildgramParentalInstrumentation extends Instrumentation {
                 fill.setAccessible(true);
                 ArrayList<UItem> items = new ArrayList<>();
                 fill.invoke(screen[0], items, null);
-                UItem widgets = null;
-                for (UItem item : items) if (item.id == 8) widgets = item;
+                UItem widgets = null, reminder = null;
+                int durations = 0;
+                for (UItem item : items) {
+                    if (item.id == 8) widgets = item;
+                    if (item.id == 9) reminder = item;
+                    if (item.id >= 10 && item.id <= 12 && item.textValue != null) durations++;
+                }
+                expect("all duration rows show values while disabled", durations == 3);
                 expect("parental section exposes checked widget restriction", widgets != null && widgets.checked);
+                expect("parental section exposes unchecked break reminder", reminder != null && !reminder.checked);
                 paused.setBoolean(screen[0], false);
+                click.invoke(screen[0], reminder, null, 0, 0f, 0f);
+                expect("unauthenticated click cannot enable break reminder", !ChildgramParentalSettings.isBreakReminderEnabled());
                 click.invoke(screen[0], widgets, null, 0, 0f, 0f);
                 expect("unauthenticated click cannot enable widgets", ChildgramParentalSettings.blockWidgets() && presented[0] == null);
                 authenticated.setBoolean(screen[0], true);
@@ -327,6 +352,10 @@ public final class ChildgramParentalInstrumentation extends Instrumentation {
                 expect("opening PIN setup does not enable widgets", ChildgramParentalSettings.blockWidgets());
                 expect("install widget-control PIN fixture", ChildgramParentalSettings.setPin("4826"));
                 expect("installing PIN does not automatically enable widgets", ChildgramParentalSettings.blockWidgets());
+                click.invoke(screen[0], reminder, null, 0, 0f, 0f);
+                expect("authenticated parent can enable break reminder", ChildgramParentalSettings.isBreakReminderEnabled());
+                click.invoke(screen[0], reminder, null, 0, 0f, 0f);
+                expect("authenticated parent can disable break reminder", !ChildgramParentalSettings.isBreakReminderEnabled());
                 click.invoke(screen[0], widgets, null, 0, 0f, 0f);
                 expect("authenticated parent can allow widgets", !ChildgramParentalSettings.blockWidgets());
                 screen[0].onPause();
@@ -345,6 +374,92 @@ public final class ChildgramParentalInstrumentation extends Instrumentation {
         } finally {
             if (screen[0] != null) onMainChecked(screen[0]::onFragmentDestroy);
         }
+    }
+
+    /** Actual dialogs in the break timing AVD check. The ordinary parental check needs no Activity. */
+    public static int checkBreakDurationDialogs(Instrumentation runner, Activity activity) throws Exception {
+        FutureTask<Integer> task = new FutureTask<>(() -> {
+            int checks = checked("edit timings with reminders disabled", !ChildgramParentalSettings.isBreakReminderEnabled());
+            ChildgramParentalActivity screen = new ChildgramParentalActivity();
+            FrameLayout host = new FrameLayout(activity);
+            screen.setParentLayout((INavigationLayout) Proxy.newProxyInstance(INavigationLayout.class.getClassLoader(),
+                    new Class<?>[]{INavigationLayout.class}, (proxy, method, args) -> {
+                        if (method.getName().equals("getParentActivity")) return activity;
+                        if (method.getName().equals("getView")) return host;
+                        if (method.getName().equals("getLastFragment")) return screen;
+                        if (method.getReturnType() == boolean.class) return false;
+                        return null;
+                    }));
+            screen.listView = new UniversalRecyclerView(activity, UserConfig.selectedAccount, screen.getClassGuid(),
+                    (items, adapter) -> {}, (item, view, pos, x, y) -> {}, (item, view, pos, x, y) -> false, null);
+            Method fill = ChildgramParentalActivity.class.getDeclaredMethod("fillItems", ArrayList.class, UniversalAdapter.class);
+            Method click = ChildgramParentalActivity.class.getDeclaredMethod("onClick", UItem.class, View.class, int.class, float.class, float.class);
+            Field paused = BaseFragment.class.getDeclaredField("isPaused");
+            Field authenticated = ChildgramParentalActivity.class.getDeclaredField("authenticated");
+            fill.setAccessible(true);
+            click.setAccessible(true);
+            paused.setAccessible(true);
+            authenticated.setAccessible(true);
+            paused.setBoolean(screen, false);
+            ArrayList<UItem> rows = new ArrayList<>();
+            fill.invoke(screen, rows, null);
+            int[] desired = {1, 60, 240};
+            String[] keys = {"break_start_minutes", "break_fade_minutes", "break_rest_minutes"};
+            SharedPreferences settings = runner.getTargetContext().getSharedPreferences("childgram_parental", Context.MODE_PRIVATE);
+            Map<String, ?> before = settings.getAll();
+            try {
+                for (UItem row : rows) {
+                    if (row.id < 10 || row.id > 12) continue;
+                    int index = row.id - 10;
+                    if (index == 0) {
+                        click.invoke(screen, row, null, 0, 0f, 0f);
+                        checks += checked("locked section cannot open duration editor", screen.getVisibleDialog() == null);
+                        authenticated.setBoolean(screen, true);
+                    }
+                    click.invoke(screen, row, null, 0, 0f, 0f);
+                    AlertDialog dialog = (AlertDialog) screen.getVisibleDialog();
+                    EditText input = dialog.findViewById(android.R.id.edit);
+                    View save = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+                    if (index == 0) {
+                        for (String invalid : new String[]{"", "0", "1.5", "241", "99999999999999999999"}) {
+                            input.setText(invalid);
+                            save.performClick();
+                            checks += checked("invalid minutes keep editor open and value intact", dialog.isShowing()
+                                    && input.getError() != null && ChildgramParentalSettings.getBreakStartMinutes() == 10);
+                        }
+                    }
+                    input.setText(String.valueOf(desired[index]));
+                    save.performClick();
+                    checks += checked("dialog saves its own setting", settings.getInt(keys[index], -1) == desired[index]);
+                    click.invoke(screen, row, null, 0, 0f, 0f);
+                    dialog = (AlertDialog) screen.getVisibleDialog();
+                    input = dialog.findViewById(android.R.id.edit);
+                    checks += checked("reopened duration shows saved minutes", input.getText().toString().equals(String.valueOf(desired[index])));
+                    input.setText("17");
+                    if (index == 2) {
+                        save = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+                        screen.onPause();
+                        checks += checked("backgrounding dismisses pending duration editor", screen.getVisibleDialog() == null);
+                        save.performClick();
+                    } else {
+                        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).performClick();
+                    }
+                    checks += checked("cancel or background discards unsaved minutes", settings.getInt(keys[index], -1) == desired[index]);
+                }
+            } finally {
+                screen.dismissCurrentDialog();
+                screen.onFragmentDestroy();
+                SharedPreferences.Editor restore = settings.edit();
+                for (String key : keys) {
+                    if (before.containsKey(key)) restore.putInt(key, (Integer) before.get(key));
+                    else restore.remove(key);
+                }
+                checks += checked("test duration settings restored", restore.commit());
+            }
+            return checks;
+        });
+        new Handler(Looper.getMainLooper()).post(task);
+        return task.get(15, TimeUnit.SECONDS);
     }
 
     private void checkPin() {
@@ -509,7 +624,7 @@ public final class ChildgramParentalInstrumentation extends Instrumentation {
     }
 
     @SuppressWarnings("unchecked")
-    private boolean restore(Map<String, ?> values) {
+    private boolean restore(SharedPreferences preferences, Map<String, ?> values) {
         SharedPreferences.Editor editor = preferences.edit().clear();
         for (Map.Entry<String, ?> entry : values.entrySet()) {
             String key = entry.getKey();
@@ -526,7 +641,11 @@ public final class ChildgramParentalInstrumentation extends Instrumentation {
     }
 
     private void expect(String label, boolean condition) {
-        assertions++;
+        assertions += checked(label, condition);
+    }
+
+    private static int checked(String label, boolean condition) {
         if (!condition) throw new AssertionError(label);
+        return 1;
     }
 }

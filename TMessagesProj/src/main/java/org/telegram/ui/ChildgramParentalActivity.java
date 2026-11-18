@@ -3,13 +3,22 @@ package org.telegram.ui;
 import static org.telegram.messenger.LocaleController.getString;
 
 import android.content.Context;
+import android.text.InputType;
+import android.view.Gravity;
 import android.view.View;
+import android.view.inputmethod.EditorInfo;
+import android.widget.FrameLayout;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.ChildgramParentalSettings;
+import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.R;
+import org.telegram.messenger.Utilities;
 import org.telegram.ui.ActionBar.AlertDialog;
+import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.Components.EditTextBoldCursor;
+import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.UItem;
 import org.telegram.ui.Components.UniversalAdapter;
 import org.telegram.ui.Components.UniversalFragment;
@@ -110,6 +119,12 @@ public final class ChildgramParentalActivity extends UniversalFragment {
         items.add(UItem.asShadow(getString(R.string.ChildgramParentalInvitesInfo)));
         items.add(UItem.asCheck(8, getString(R.string.ChildgramParentalWidgets)).setChecked(ChildgramParentalSettings.blockWidgets()));
         items.add(UItem.asShadow(getString(R.string.ChildgramParentalWidgetsInfo)));
+        items.add(UItem.asHeader(getString(R.string.ChildgramUsageTitle)));
+        items.add(UItem.asCheck(9, getString(R.string.ChildgramParentalBreakReminder)).setChecked(ChildgramParentalSettings.isBreakReminderEnabled()));
+        items.add(durationRow(10, R.string.ChildgramBreakStartMinutes, ChildgramParentalSettings.getBreakStartMinutes()));
+        items.add(durationRow(11, R.string.ChildgramBreakFadeMinutes, ChildgramParentalSettings.getBreakFadeMinutes()));
+        items.add(durationRow(12, R.string.ChildgramBreakRestMinutes, ChildgramParentalSettings.getBreakRestMinutes()));
+        items.add(UItem.asShadow(getString(R.string.ChildgramParentalBreakReminderInfo)));
         items.add(UItem.asHeader(getString(R.string.ChildgramParentalPinHeader)));
         boolean hasPin = ChildgramParentalSettings.hasPin();
         items.add(UItem.asButton(5, getString(hasPin ? R.string.ChildgramParentalChangePin : R.string.ChildgramParentalSetPin)));
@@ -118,6 +133,10 @@ public final class ChildgramParentalActivity extends UniversalFragment {
         if (!ChildgramParentalSettings.isSetupAcknowledged()) {
             items.add(UItem.asButton(7, getString(R.string.Continue)));
         }
+    }
+
+    private UItem durationRow(int id, int title, int minutes) {
+        return UItem.asButton(id, getString(title), LocaleController.formatPluralString("Minutes", minutes));
     }
 
     @Override protected void onClick(UItem item, View view, int position, float x, float y) {
@@ -152,8 +171,56 @@ public final class ChildgramParentalActivity extends UniversalFragment {
                 }
                 ChildgramParentalSettings.setBlockWidgets(!ChildgramParentalSettings.blockWidgets());
                 break;
+            case 9: ChildgramParentalSettings.setBreakReminderEnabled(!ChildgramParentalSettings.isBreakReminderEnabled()); break;
+            case 10: editDuration(item.text, ChildgramParentalSettings.getBreakStartMinutes(), ChildgramParentalSettings::setBreakStartMinutes); return;
+            case 11: editDuration(item.text, ChildgramParentalSettings.getBreakFadeMinutes(), ChildgramParentalSettings::setBreakFadeMinutes); return;
+            case 12: editDuration(item.text, ChildgramParentalSettings.getBreakRestMinutes(), ChildgramParentalSettings::setBreakRestMinutes); return;
         }
         listView.adapter.update(false);
+    }
+
+    private void editDuration(CharSequence title, int minutes, Utilities.CallbackReturn<Integer, Boolean> save) {
+        Context context = getParentActivity();
+        if (context == null) return;
+        String range = LocaleController.formatString(R.string.ChildgramBreakMinutesRange, ChildgramParentalSettings.MAX_BREAK_MINUTES);
+        EditTextBoldCursor input = new EditTextBoldCursor(context);
+        input.setId(android.R.id.edit);
+        input.setSingleLine(true);
+        // Keep pasted text intact for validation, while asking the IME for a numeric keyboard.
+        input.setRawInputType(InputType.TYPE_CLASS_NUMBER);
+        input.setImeOptions(EditorInfo.IME_ACTION_DONE);
+        input.setTextColor(Theme.getColor(Theme.key_dialogTextBlack, getResourceProvider()));
+        input.setBackground(Theme.createEditTextDrawable(context, true));
+        input.setText(String.valueOf(minutes));
+        input.setSelectAllOnFocus(true);
+        FrameLayout frame = new FrameLayout(context);
+        frame.addView(input, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 48, Gravity.CENTER, 24, 0, 24, 0));
+        AlertDialog dialog = new AlertDialog.Builder(context, getResourceProvider())
+                .setTitle(title).setMessage(range).setView(frame)
+                .setNegativeButton(getString(R.string.Cancel), null)
+                .setPositiveButton(getString(R.string.Save), null).create();
+        dialog.setFocusable(true);
+        if (showDialog(dialog) == null) return;
+        View confirm = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+        confirm.setOnClickListener(v -> {
+            if (!authenticated || isPaused || getVisibleDialog() != dialog) return;
+            int value;
+            try {
+                value = Integer.parseInt(input.getText().toString());
+            } catch (NumberFormatException e) {
+                input.setError(range);
+                return;
+            }
+            if (!save.run(value)) {
+                input.setError(range);
+                return;
+            }
+            dialog.dismiss();
+            listView.adapter.update(false);
+        });
+        input.setOnEditorActionListener((v, action, event) -> action == EditorInfo.IME_ACTION_DONE && confirm.performClick());
+        input.requestFocus();
+        AndroidUtilities.showKeyboard(input);
     }
 
     private void setupPin() {

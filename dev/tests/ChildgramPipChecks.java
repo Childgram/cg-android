@@ -4,6 +4,8 @@ import android.accessibilityservice.AccessibilityService;
 import android.app.Activity;
 import android.app.Instrumentation;
 import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.Color;
 import android.os.SystemClock;
 import android.provider.Settings;
 import android.view.View;
@@ -129,6 +131,7 @@ public final class ChildgramPipChecks {
             });
             await("paused PiP no longer counts as playback", () -> PhotoViewer.getChildgramPipVideoMessage() == null
                     && current("currentPip") == null && trackedPip() == null && !session.content.isPlaying());
+            checkBreakDim();
             main(() -> {
                 expect("paused PiP retains a candidate for later polling", PhotoViewer.hasChildgramPipVideo());
                 expect("pausing preserves the message source", viewer.getCurrentMessageObject() == message);
@@ -155,6 +158,36 @@ public final class ChildgramPipChecks {
         }
         expect("local video fixture is deleted", !video.exists());
         return assertions;
+    }
+
+    private void checkBreakDim() throws Exception {
+        stage = "break filter on outside PiP";
+        Bitmap before = instrumentation.getUiAutomation().takeScreenshot(), dark = null, restored = null;
+        try {
+            main(() -> ChildgramBreakController.setPipDim(1f, false));
+            SystemClock.sleep(300);
+            dark = instrumentation.getUiAutomation().takeScreenshot();
+            main(() -> ChildgramBreakController.setPipDim(0, false));
+            SystemClock.sleep(300);
+            restored = instrumentation.getUiAutomation().takeScreenshot();
+            expect("compositor returned three PiP frames", before != null && dark != null && restored != null);
+            int recovered = 0;
+            for (int y = 0; y < before.getHeight(); y += 4) {
+                for (int x = 0; x < before.getWidth(); x += 4) {
+                    int a = before.getPixel(x, y), b = dark.getPixel(x, y), c = restored.getPixel(x, y);
+                    int brightest = Math.max(Color.red(a), Math.max(Color.green(a), Color.blue(a)));
+                    if (brightest > 100 && Color.red(b) < 15 && Color.green(b) < 15 && Color.blue(b) < 15
+                            && Math.abs(Color.red(a) - Color.red(c)) < 16 && Math.abs(Color.green(a) - Color.green(c)) < 16
+                            && Math.abs(Color.blue(a) - Color.blue(c)) < 16) recovered++;
+                }
+            }
+            expect("paused test video turns black and its actual pixels return", recovered > 150);
+        } finally {
+            main(() -> ChildgramBreakController.setPipDim(0, false));
+            if (before != null) before.recycle();
+            if (dark != null) dark.recycle();
+            if (restored != null) restored.recycle();
+        }
     }
 
     private void checkSource(int kind) throws Exception {
